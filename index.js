@@ -1,3 +1,7 @@
+// ===================================================================
+// You can delete all these files and upload your project or bot.
+// ===================================================================
+
 const Discord = require("discord.js")
 const client = new Discord.Client()
 
