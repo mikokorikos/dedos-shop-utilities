@@ -15,5 +15,5 @@ client.on("message", msg => {
     }
 })
 
-// Change your discord bot token in the .env file
+// Change your discord bot token here
 client.login('Your token here')
