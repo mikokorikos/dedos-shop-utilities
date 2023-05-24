@@ -2,12 +2,12 @@
 // You can delete all these files and upload your project or bot.
 // ===================================================================
 
-const Discord = require("discord.js")
-const client = new Discord.Client()
+const { Client, Events, GatewayIntentBits } = require('discord.js');
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-client.on("ready", () => {
-    console.log(`Logged in as ${client.user.tag}!`)
-})
+client.once(Events.ClientReady, c => {
+	console.log(`Ready! Logged in as ${c.user.tag}`);
+});
 
 client.on("message", msg => {
     if (msg.content === "ping") {
@@ -16,4 +16,4 @@ client.on("message", msg => {
 })
 
 // Change your discord bot token in the .env file
-client.login(process.env.TOKEN)
+client.login('Your token here')
