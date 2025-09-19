@@ -1,58 +1,67 @@
-# Dedos Bienvenidas Bot
+# Dedos Shop Utilities Bot
 
-Bot de Discord modularizado para dar la bienvenida por DM, gestionar reglas con verificacion por reaccion y operar 24/7 en un host supervisado (PM2, NSSM, systemd, etc.).
+Bot de Discord construido con [discord.js v14](https://discord.js.org/#/) siguiendo principios SOLID y un sistema de comandos con prefijo configurable (`;` por defecto) combinado con interacciones modernas.
+Ofrece verificación, mensajes de bienvenida, sistema de warns con MySQL, panel de tickets, recordatorios de eventos y menús de ayuda.
 
 ## Requisitos
-- Node.js 18 o superior
+- Node.js **18.17** o superior
 - Dependencias instaladas con `npm install`
+- Base de datos MySQL (opcional para warns y recordatorios)
 
-## Ejecucion
+## Puesta en marcha
 ```bash
 npm install
 npm start
 ```
 
-El punto de entrada `index.js` inicializa el cliente, registra los manejadores en `src/` y mantiene el bot activo con reintentos y apagado seguro.
+Configura las variables de entorno en un archivo `.env` (puedes usar `.env.example` como referencia) e incluye al menos:
 
-## Variables de entorno (.env)
-La mayoria de los valores se leen desde `.env` mediante `dotenv`. Ajusta segun tu servidor:
+| Variable | Descripción |
+| --- | --- |
+| `BOT_TOKEN` | Token del bot de Discord. |
+| `COMMAND_PREFIX` | Prefijo de texto para los comandos (por defecto `;`). |
+| `VERIFIED_ROLE_ID` | Rol asignado al completar la verificación. |
+| `VERIFICATION_CHANNEL_ID` | Canal donde se publica el mensaje de reglas/verificación. |
+| `INVITE_CHANNEL_ID` | Canal de invitaciones utilizado en los mensajes de bienvenida. |
+| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | Credenciales MySQL (opcional, pero requeridas para warns y recordatorios). |
 
-- `TOKEN` (**requerido**): token del bot de Discord.
-- `LOG_LEVEL` o `DEBUG`: nivel de logging (`fatal`, `error`, `warn`, `info`, `debug`, `trace`). `DEBUG=1` habilita modo detallado.
-- `VERIFIED_ROLE_ID`: ID del rol que se asignara tras la verificacion.
-- `VERIFICATION_CHANNEL_ID`: canal donde se publica el mensaje de reglas y verificacion.
-- `VERIFICATION_MESSAGE_ID`: opcional; se rellena automaticamente al usar `!reglas`.
-- `VERIFICATION_EMOJI`: emoji (unicode, `\uXXXX` o `<:custom:id>`) que los usuarios deben reaccionar.
-- `INVITE_CHANNEL_ID`: canal donde se anuncia la llegada de nuevos miembros.
-- `GUILD_URL`: enlace principal del servidor (tambien usado en el boton "Servidor").
-- `HELP_URL`: enlace de ayuda; por defecto usa `GUILD_URL`.
-- `BRAND_ICON`: URL del icono que se muestra en los embeds.
-- `WELCOME_GIF`: ruta local o URL para adjuntar un GIF en DMs y embeds.
-- `WELCOME_DM_TITLE`, `WELCOME_DM_MESSAGE`: textos del embed privado de bienvenida.
-- `WELCOME_CHANNEL_MESSAGE`: mensaje publico de bienvenida con soportes `{user}` y `{guild}`.
-- `WELCOME_RATE_MS`: intervalo en ms entre envios de bienvenida (minimo 250 ms).
-- `WELCOME_CONCURRENCY`: cantidad de DMs procesados en paralelo.
-- `WELCOME_MAX_QUEUE`: tamano maximo de la cola de bienvenidas.
-- `LOGIN_MAX_ATTEMPTS`: intentos maximos de login antes de abortar.
-- `LOGIN_RETRY_MS`: retardo inicial entre reintentos de login.
-- `LOGIN_MAX_RETRY_MS`: retardo maximo entre reintentos (por defecto 60000 ms).
-- `ENV_FILE`: ruta del archivo `.env` a actualizar cuando se guarda el ID de verificacion.
+Consulta `config/index.js` para el listado completo de opciones disponibles (colores, URLs, límites de tickets, recordatorios, etc.).
 
-## Arquitectura
-- `src/app.js`: crea el cliente, registra eventos y gestiona login/apagado.
-- `src/config.js`: normaliza variables de entorno y niveles de log.
-- `src/utils/logger.js`: logger simple con niveles y loggers hijo por area.
-- `src/queue/rateLimitedQueue.js`: cola con control de tasa y concurrencia.
-- `src/services/welcomeService.js`: DM y anuncio de bienvenida con cola resiliente.
-- `src/services/verificationService.js`: comando `!reglas`, reaccion de verificacion y asignacion de roles.
-- `src/embeds/index.js`: generadores de embeds reutilizables.
-- `src/state/verification.js`: persiste `VERIFICATION_MESSAGE_ID` en `.env`.
-- `src/startup/`: login con reintentos y apagado seguro.
+## Comandos disponibles
+Los comandos de texto se ejecutan escribiendo el prefijo seguido del comando en cualquier canal donde tengas permisos:
 
-## Flujos principales
-- `guildMemberAdd`: la cola procesa el DM privado y el mensaje en el canal configurado.
-- `!reglas`: publica o actualiza el mensaje de verificacion y guarda el ID en `.env`.
-- Reacciones sobre el mensaje de verificacion: asigna o remueve el rol configurado.
+| Comando | Descripción |
+| --- | --- |
+| `;reglas [#canal|canal_id]` | Publica el mensaje de reglas con botón de verificación y menú de ayuda. |
+| `;tickets [#canal|canal_id]` | Publica el panel de selección para abrir tickets. |
+| `;evento` | Publica el panel de inscripción al evento configurado. |
+| `;warn @usuario [--puntos <1-10>] [--contexto <url>] razón` | Registra una advertencia en la base de datos y notifica al usuario. |
+| `;warns @usuario [limite]` | Consulta el historial de advertencias de un usuario. |
+| `;verbalwarn @usuario mensaje` | Envía una advertencia verbal por DM sin registrarla. |
 
-## Supervision 24/7
-El modulo `shutdown.js` detiene de forma segura la cola y el cliente, permitiendo que un supervisor (PM2, systemd, NSSM, etc.) reinicie el proceso tras fallos. Los reintentos exponenciales de login evitan ciclos intensivos ante errores temporales.
+## Estructura del proyecto
+```
+config/      # Normalización de variables de entorno y constantes del bot
+commands/    # Comandos con prefijo (uno por archivo)
+events/      # Listeners de eventos de Discord
+services/    # Lógica de negocio (welcome, tickets, warns, eventos, FX, verificación, etc.)
+utils/       # Utilidades compartidas (logger, parseo de env, embeds, permisos)
+index.js     # Punto de entrada: crea el cliente y registra comandos/eventos
+```
+
+## Servicios principales
+- **WelcomeService**: gestiona la cola rate-limited de mensajes de bienvenida.
+- **VerificationService**: genera el embed de reglas, administra el botón de verificación y persiste el ID del mensaje.
+- **TicketService**: ofrece el panel de tickets, crea canales, aplica permisos y cierra tickets mediante botones.
+- **WarnService**: registra warns en MySQL, genera embeds e informa por DM a los usuarios sancionados.
+- **EventService**: publica eventos, administra el rol de participantes y envía recordatorios automáticos por canal.
+- **FxService**: actualiza de forma periódica la tasa MXN→USD para los precios del panel de tickets.
+
+Cada servicio expone métodos pequeños y reutilizables que son orquestados desde los comandos y eventos.
+
+## Logs y estado
+- Los logs se almacenan en `logs/` utilizando [winston](https://github.com/winstonjs/winston) con rotación diaria.
+- El ID del mensaje de verificación se guarda en `config/state.json` (excluido del control de versiones).
+
+## Mantenimiento 24/7
+El bot está pensado para ejecutarse en supervisores como PM2, systemd o contenedores. Ante errores fatales o rechazos sin capturar, estos se registran con claridad y el proceso finaliza con código distinto de cero para permitir reinicios controlados.

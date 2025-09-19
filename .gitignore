@@ -6,6 +6,7 @@ yarn.lock
 
 # Env
 .env
+config/state.json
 
 # PM2 logs/pids
 logs/
