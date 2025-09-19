@@ -68,6 +68,15 @@ export default {
     let storedValue = null;
 
     if (settingKey === 'event.required_tag') {
+      if (!eventVerificationService) {
+        await message
+          .reply({
+            content: 'El sistema de verificación de eventos está desactivado. No es necesario configurar la etiqueta.',
+            allowedMentions: { repliedUser: false },
+          })
+          .catch(() => {});
+        return;
+      }
       storedValue = args.join(' ').trim();
     } else if (settingKey === 'event.control_channel_id') {
       const mention = args[0];
@@ -83,6 +92,16 @@ export default {
       }
       storedValue = channelId;
     } else if (settingKey === 'event.verification_interval_minutes') {
+      if (!eventVerificationService) {
+        await message
+          .reply({
+            content: 'El sistema de verificación de eventos está desactivado. No es necesario ajustar el intervalo.',
+            allowedMentions: { repliedUser: false },
+          })
+          .catch(() => {});
+        return;
+      }
+
       const parsed = Number(args[0]);
       if (!Number.isFinite(parsed) || parsed < 1) {
         await message
