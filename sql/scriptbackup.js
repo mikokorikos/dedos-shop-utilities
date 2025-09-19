@@ -304,8 +304,8 @@ function resolveGifPath() {
       'dedosgif.gif',
       path.join(process.cwd(), 'dedosgif.gif'),
       path.join(process.cwd(), 'assets', 'dedosgif.gif'),
-      'dedosgift.gif',
-      path.join(process.cwd(), 'dedosgift.gif')
+      'dedosgif.gif',
+      path.join(process.cwd(), 'dedosgif.gif')
     );
 
     cachedGifPath = candidates.find((candidate) => candidate && fs.existsSync(candidate)) || null;

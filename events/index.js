@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const eventsPath = path.join(process.cwd(), 'events');
 
@@ -12,7 +13,7 @@ export const loadEvents = async () => {
 
   for (const file of files) {
     const filePath = path.join(eventsPath, file);
-    const module = await import(filePath);
+    const module = await import(pathToFileURL(filePath).href);
     const event = module.default;
     if (!event?.name || typeof event.execute !== 'function') {
       // eslint-disable-next-line no-continue
