@@ -196,6 +196,9 @@ export class EventVerificationService {
     } catch (error) {
       this.logger.warn(`[VERIFY] No se pudo obtener la biografía de ${member.id}: ${error?.message || error}`);
     }
+    this.logger.info(
+      `[VERIFY] Biografía de ${member.user.tag} (${member.id}): ${bioText ? bioText : '<vacía>'}`
+    );
     const bioOk = this.#hasRequiredBioLink(bioText);
 
     return { tagOk, bioOk, bioText, nickname };
@@ -217,7 +220,22 @@ export class EventVerificationService {
     if (typeof bioText !== 'string' || !bioText) {
       return false;
     }
-    return bioText.includes(requiredLink);
+    const normalizedBio = bioText.toLowerCase();
+    const normalizedLink = requiredLink.toLowerCase().trim();
+    const linkWithoutProtocol = normalizedLink.replace(/^https?:\/\//, '');
+    const linkWithoutTrailingSlash = normalizedLink.replace(/\/+$/, '');
+    const linkBareWithoutSlash = linkWithoutProtocol.replace(/\/+$/, '');
+
+    const variations = [
+      normalizedLink,
+      linkWithoutProtocol,
+      linkWithoutTrailingSlash,
+      linkBareWithoutSlash,
+      `${linkWithoutTrailingSlash}/`,
+      `${linkBareWithoutSlash}/`,
+    ].filter((value, index, array) => value && array.indexOf(value) === index);
+
+    return variations.some((variant) => normalizedBio.includes(variant));
   }
 
   async #decideAction({ guildId, participant, check }) {
