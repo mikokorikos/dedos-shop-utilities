@@ -3,8 +3,6 @@ import { buildEmbedPayload, EMBED_GIF_FILENAME } from '../utils/embed.js';
 import { resolveGifPath } from '../utils/media.js';
 import { parseSqlDate } from '../utils/time.js';
 
-const DEFAULT_REQUIRED_BIO_LINK = 'https://discord.gg/dedos';
-
 const EVENT_EMBED_TEMPLATE = {
   title: 'EVENTO DE MENSAJES : <:79071starrymoon:1417433441825325147>',
   description:
@@ -150,14 +148,6 @@ export class EventService {
     return embed;
   }
 
-  #getRequiredBioLink() {
-    const link = this.config?.GUILD_URL;
-    if (link && typeof link === 'string' && link.trim()) {
-      return link.trim();
-    }
-    return DEFAULT_REQUIRED_BIO_LINK;
-  }
-
   async #fetchSessionMessage(sessionInfo) {
     if (!this.client) return null;
     try {
@@ -222,6 +212,20 @@ export class EventService {
     if (!sessionId || !messageId) return;
     this.sessionIndex.set(sessionId, { guildId, channelId, messageId, useAttachment: Boolean(useAttachment) });
     this.messageSessionMap.set(messageId, sessionId);
+  }
+
+  #resolveEventChannelId(guildId) {
+    if (this.config.EVENTS_CHANNEL_ID) {
+      return this.config.EVENTS_CHANNEL_ID;
+    }
+
+    for (const sessionInfo of this.sessionIndex.values()) {
+      if (sessionInfo.guildId === guildId && sessionInfo.channelId) {
+        return sessionInfo.channelId;
+      }
+    }
+
+    return null;
   }
 
   #getEventStateForMessage(message, sessionId) {
@@ -402,119 +406,73 @@ export class EventService {
     return session;
   }
 
- async handleJoin(interaction) {
-  const guild = interaction.guild;
-  if (!guild) {
-    await interaction.reply({
-      content: 'No pude procesar la acción fuera del servidor.',
-      ephemeral: true,
-    });
-    return;
-  }
-
-  const roleId = this.config.EVENT_ROLE_ID;
-  if (!roleId) {
-    await interaction.reply({
-      content: 'No hay un rol configurado para el evento.',
-      ephemeral: true,
-    });
-    return;
-  }
-
-  let member = interaction.member;
-  if (!member || typeof member.roles?.add !== 'function') {
-    member = await guild.members.fetch(interaction.user.id).catch(() => null);
-  }
-
-  if (!member) {
-    await interaction.reply({
-      content: 'No pude obtener tu información de miembro.',
-      ephemeral: true,
-    });
-    return;
-  }
-
-  const requiredBioLink = this.#getRequiredBioLink();
-  if (requiredBioLink) {
-    let bioText = '';
-    try {
-      // ⚡ Se usa fetchProfile en lugar de fetch(true)
-      const profile = await member.user.fetchProfile();
-      bioText = profile?.aboutMe || ''; // alternativa real a user.bio
-    } catch (error) {
-      this.logger.warn(
-        `[EVENT] No se pudo verificar la biografía de ${member.id}: ${error?.message || error}`
-      );
-      const message = 'No pude verificar tu biografía. Intenta de nuevo más tarde.';
+  async handleJoin(interaction) {
+    const respond = async (content) => {
+      const payload = { content, ephemeral: true };
       if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({ content: message, ephemeral: true }).catch(() => {});
+        await interaction.followUp(payload).catch(() => {});
       } else {
-        await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+        await interaction.reply(payload).catch(() => {});
       }
+    };
+
+    const guild = interaction.guild;
+    if (!guild) {
+      await respond('No pude procesar la acción fuera del servidor.');
       return;
     }
 
-    this.logger.info(
-      `[EVENT] Biografía de ${interaction.user.tag} (${interaction.user.id}): ${bioText || '<vacía>'}`
-    );
-
-    if (!bioText.includes(requiredBioLink)) {
-      const message = `No puedes unirte al evento. Asegúrate de que tu biografía incluya ${requiredBioLink}.`;
-      this.logger.info(
-        `[EVENT] ${interaction.user.tag} no cumple con el requisito de biografía para unirse al evento.`
-      );
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({ content: message, ephemeral: true }).catch(() => {});
-      } else {
-        await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
-      }
+    const eventChannelId = this.#resolveEventChannelId(guild.id);
+    if (eventChannelId && interaction.channelId !== eventChannelId) {
+      await respond(`Por favor únete desde <#${eventChannelId}>.`);
       return;
     }
-  }
 
-  // Si pasa la verificación, agregar rol
-  try {
-    await member.roles.add(roleId);
-    await interaction.reply({
-      content: 'Te has unido al evento correctamente 🎉',
-      ephemeral: true,
-    });
-    this.logger.info(`[EVENT] ${interaction.user.tag} se unió al evento con éxito.`);
-  } catch (error) {
-    this.logger.error(`[EVENT] Error al asignar rol: ${error?.message || error}`);
-    const message = 'Hubo un error al darte el rol del evento.';
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({ content: message, ephemeral: true }).catch(() => {});
-    } else {
-      await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+    const roleId = this.config.EVENT_ROLE_ID;
+    if (!roleId) {
+      await respond('No hay un rol configurado para el evento.');
+      return;
     }
-  }
 
-    const role = guild.roles.cache.get(roleId) || (await guild.roles.fetch(roleId).catch(() => null));
-    if (!role) {
-      await interaction.reply({
-        content: 'El rol del evento no existe. Contacta a un administrador.',
-        ephemeral: true,
+    let member = interaction.member;
+    if (!member || typeof member.roles?.add !== 'function') {
+      member = await guild.members.fetch(interaction.user.id).catch(() => null);
+    }
+
+    if (!member) {
+      await respond('No pude obtener tu información de miembro.');
+      return;
+    }
+
+    if (this.sanctionRepository?.enabled) {
+      const banned = await this.sanctionRepository.isPermanentlyBanned({
+        guildId: guild.id,
+        userId: interaction.user.id,
       });
-      return;
-    }
-
-    const alreadyHasRole = member.roles.cache.has(roleId);
-    if (!alreadyHasRole) {
-      try {
-        await member.roles.add(roleId, `Evento: unión por botón (${interaction.user.tag})`);
-      } catch (error) {
-        this.logger.error('[EVENT] No se pudo asignar el rol del evento:', error);
-        await interaction.reply({
-          content: 'No pude asignarte el rol del evento. Intenta de nuevo más tarde.',
-          ephemeral: true,
-        });
+      if (banned) {
+        await respond('No puedes unirte al evento porque tienes un baneo permanente de eventos.');
         return;
       }
     }
 
-    const sessionId = this.messageSessionMap.get(interaction.message.id);
-    if (!sessionId && this.sessionRepository?.enabled) {
+    const role = guild.roles.cache.get(roleId) || (await guild.roles.fetch(roleId).catch(() => null));
+    if (!role) {
+      await respond('El rol del evento no existe. Contacta a un administrador.');
+      return;
+    }
+
+    const alreadyHadRole = member.roles.cache.has(roleId);
+    if (!alreadyHadRole) {
+      try {
+        await member.roles.add(roleId, `Evento: unión por botón (${interaction.user.tag})`);
+      } catch (error) {
+        this.logger.error('[EVENT] No se pudo asignar el rol del evento:', error);
+        await respond('No pude asignarte el rol del evento. Intenta de nuevo más tarde.');
+        return;
+      }
+    }
+
+    if (!this.messageSessionMap.has(interaction.message.id) && this.sessionRepository?.enabled) {
       const session = await this.sessionRepository.findActiveSession(guild.id);
       if (session) {
         this.#cacheSessionReference({
@@ -526,21 +484,7 @@ export class EventService {
       }
     }
 
-    const resolvedSessionId = this.messageSessionMap.get(interaction.message.id);
-
-    if (this.sanctionRepository?.enabled) {
-      const banned = await this.sanctionRepository.isPermanentlyBanned({
-        guildId: guild.id,
-        userId: interaction.user.id,
-      });
-      if (banned) {
-        await interaction.reply({
-          content: 'No puedes unirte al evento porque tienes un baneo permanente de eventos.',
-          ephemeral: true,
-        });
-        return;
-      }
-    }
+    const resolvedSessionId = this.messageSessionMap.get(interaction.message.id) || null;
 
     if (resolvedSessionId && this.participantRepository?.enabled) {
       await this.participantRepository.upsertParticipant({
@@ -552,18 +496,14 @@ export class EventService {
 
     const state = this.#getEventStateForMessage(interaction.message, resolvedSessionId);
     state.joinedIds.add(interaction.user.id);
-
     await this.#refreshEventMessage(interaction.message, state);
 
-    const response = alreadyHasRole
+    const response = alreadyHadRole
       ? 'Ya estabas inscrito en el evento. ¡Nos vemos ahí!'
       : 'Te uniste al evento y recibiste el rol.';
 
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({ content: response, ephemeral: true });
-    } else {
-      await interaction.reply({ content: response, ephemeral: true });
-    }
+    await respond(response);
+    this.logger.info(`[EVENT] ${interaction.user.tag} se unió al evento.`);
   }
 
   async #getReminderState(guildId, userId) {
@@ -849,9 +789,16 @@ export class EventService {
 
         const embed = this.#buildReminderEmbed({ guild: message.guild, member });
         const joinButton = new ButtonBuilder()
-          .setCustomId(this.config.EVENT_JOIN_BUTTON_ID)
-          .setStyle(ButtonStyle.Success)
+          .setStyle(ButtonStyle.Link)
           .setLabel(this.config.EVENT_REMINDER_JOIN_LABEL || this.config.EVENT_BUTTON_LABEL || 'Ir al evento');
+        const targetChannelId = this.#resolveEventChannelId(message.guildId);
+        if (targetChannelId) {
+          joinButton.setURL(`https://discord.com/channels/${message.guildId}/${targetChannelId}`);
+        } else if (this.config.GUILD_URL) {
+          joinButton.setURL(this.config.GUILD_URL);
+        } else {
+          joinButton.setURL('https://discord.com/app');
+        }
         const stopButton = new ButtonBuilder()
           .setCustomId(this.config.EVENT_REMINDER_STOP_BUTTON_ID)
           .setStyle(ButtonStyle.Secondary)

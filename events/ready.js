@@ -3,14 +3,7 @@ import { ActivityType } from 'discord.js';
 export default {
   name: 'ready',
   once: true,
-  async execute(client, {
-    logger,
-    config,
-    fxService,
-    welcomeService,
-    eventService,
-    eventVerificationService,
-  }) {
+  async execute(client, { logger, config, fxService, welcomeService, eventService }) {
     logger.info(`🤖 Bot conectado como ${client.user.tag}`);
 
     logger.info(`📢 Prefijo de comandos: "${config.COMMAND_PREFIX}"`);
@@ -23,8 +16,5 @@ export default {
     welcomeService.start();
     fxService.start();
     await eventService.init(client);
-    if (eventVerificationService) {
-      eventVerificationService.attachClient(client);
-    }
   },
 };

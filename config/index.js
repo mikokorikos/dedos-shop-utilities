@@ -84,15 +84,6 @@ const config = {
     sanitizeEnvValue(process.env.EVENT_REMINDER_STOP_LABEL) || 'No volver a recordar',
   EVENT_BRAND_ICON: sanitizeEnvValue(process.env.EVENT_BRAND_ICON),
   EVENT_SESSION_NAME: sanitizeEnvValue(process.env.EVENT_SESSION_NAME),
-  EVENT_REQUIRED_TAG: sanitizeEnvValue(process.env.EVENT_REQUIRED_TAG) || '[Dedos]',
-  EVENT_VERIFICATION_INTERVAL_MINUTES: Math.max(
-    1,
-    parseIntEnv(process.env.EVENT_VERIFICATION_INTERVAL_MINUTES, 60)
-  ),
-  EVENT_VERIFICATION_CONTROL_CHANNEL_ID: sanitizeEnvValue(
-    process.env.EVENT_VERIFICATION_CONTROL_CHANNEL_ID
-  ),
-
   TICKET_PANEL_CHANNEL_ID: sanitizeEnvValue(process.env.TICKET_PANEL_CHANNEL_ID),
   TICKET_CATEGORY_ID: sanitizeEnvValue(process.env.TICKET_CATEGORY_ID),
   TICKET_STAFF_ROLE_IDS: parseIdListEnv(
