@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const commandsPath = path.join(process.cwd(), 'commands');
 
@@ -28,7 +29,7 @@ export const loadCommands = async () => {
 
   for (const file of files) {
     const filePath = path.join(commandsPath, file);
-    const module = await import(filePath);
+    const module = await import(pathToFileURL(filePath).href);
     const command = module.default;
     if (!command?.name || typeof command.execute !== 'function') {
       // eslint-disable-next-line no-continue
