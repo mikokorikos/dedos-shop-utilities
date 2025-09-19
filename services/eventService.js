@@ -3,7 +3,7 @@ import { buildEmbedPayload, EMBED_GIF_FILENAME } from '../utils/embed.js';
 import { resolveGifPath } from '../utils/media.js';
 import { parseSqlDate } from '../utils/time.js';
 
-const EVENT_EMBED_TEMPLATE = {
+const EVENT_EMBED_TEMPLATE = { 
   title: 'EVENTO DE MENSAJES : <:79071starrymoon:1417433441825325147>',
   description:
     'El servidor está por cumplir 2 semanas desde su creación ?? y queremos celebrar con un **evento de actividad** donde habrá **3 ganadores**.',
@@ -53,70 +53,7 @@ export class EventService {
     this.reminderRoleWarningLogged = false;
     this.reminderChannelWarningLogged = false;
     this.gifPath = null;
-    this.client = null;
-    this.messageSessionMap = new Map();
-    this.sessionIndex = new Map();
-  }
 
-  #resolveSessionName() {
-    if (this.config.EVENT_SESSION_NAME) {
-      return this.config.EVENT_SESSION_NAME;
-    }
-    const now = new Date();
-    return `Evento ${now.toLocaleDateString('es-ES')}`;
-  }
-
-  async init(client) {
-    this.client = client;
-    this.gifPath = resolveGifPath(this.config.WELCOME_GIF);
-
-    if (!this.sessionRepository?.enabled) {
-      return;
-    }
-
-    const sessions = await this.sessionRepository.listActiveSessions();
-    for (const session of sessions) {
-      this.#cacheSessionReference({
-        sessionId: session.id,
-        guildId: session.guild_id,
-        channelId: session.channel_id,
-        messageId: session.message_id,
-      });
-
-      if (!session.message_id || !session.channel_id) {
-        continue;
-      }
-
-      const message = await this.#fetchSessionMessage(session).catch((error) => {
-        this.logger.warn(
-          `[EVENT] No se pudo recuperar el mensaje ${session.message_id} para la sesión ${session.id}: ${error?.message || error}`
-        );
-        return null;
-      });
-
-      if (!message) {
-        continue;
-      }
-
-      const state = this.#getEventStateForMessage(message, session.id);
-
-      if (state.joinedIds.size === 0 && this.participantRepository) {
-        const participants = await this.participantRepository
-          .listCurrentParticipants(session.id)
-          .catch(() => []);
-        for (const userId of participants) {
-          state.joinedIds.add(userId);
-        }
-        if (participants.length) {
-          await this.#refreshEventMessage(message, state).catch(() => {});
-        }
-      }
-    }
-  }
-
-  async getActiveSession(guildId) {
-    if (!this.sessionRepository?.enabled) return null;
-    return this.sessionRepository.findActiveSession(guildId);
   }
 
   buildEventEmbed({ joinedUserIds = [], useAttachment = false } = {}) {
