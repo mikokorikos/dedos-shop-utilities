@@ -1,0 +1,18 @@
+# Node
+node_modules/
+npm-debug.log*
+pnpm-lock.yaml
+yarn.lock
+
+# Env
+.env
+config/state.json
+
+# PM2 logs/pids
+logs/
+pids/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
