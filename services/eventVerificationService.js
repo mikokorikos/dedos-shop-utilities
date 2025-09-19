@@ -202,9 +202,28 @@ export class EventVerificationService {
     } catch (error) {
       this.logger.warn(`[VERIFY] No se pudo obtener la biografía de ${member.id}: ${error?.message || error}`);
     }
-    const bioOk = bioText.includes('https://discord.gg/dedos');
+    const bioOk = this.#hasRequiredBioLink(bioText);
 
     return { tagOk, bioOk, bioText, nickname };
+  }
+
+  #getRequiredBioLink() {
+    const link = this.config?.GUILD_URL;
+    if (link && typeof link === 'string' && link.trim()) {
+      return link.trim();
+    }
+    return 'https://discord.gg/dedos';
+  }
+
+  #hasRequiredBioLink(bioText) {
+    const requiredLink = this.#getRequiredBioLink();
+    if (!requiredLink) {
+      return true;
+    }
+    if (typeof bioText !== 'string' || !bioText) {
+      return false;
+    }
+    return bioText.includes(requiredLink);
   }
 
   async #decideAction({ guildId, participant, check }) {
@@ -365,9 +384,12 @@ export class EventVerificationService {
       [VERIFICATION_ACTIONS.PERMANENT_BAN]: 'Baneo permanente',
     };
 
+    const requiredBioLink = this.#getRequiredBioLink();
     const descriptions = {
       [VERIFICATION_REASONS.MISSING_TAG]: 'Debes mantener la etiqueta oficial del servidor en tu nombre.',
-      [VERIFICATION_REASONS.MISSING_BIO]: 'Tu biografía debe incluir el enlace https://discord.gg/dedos.',
+      [VERIFICATION_REASONS.MISSING_BIO]: requiredBioLink
+        ? `Tu biografía debe incluir el enlace ${requiredBioLink}.`
+        : 'Tu biografía debe incluir el enlace requerido del servidor.',
       left_guild: 'El miembro ya no se encuentra en el servidor.',
     };
 

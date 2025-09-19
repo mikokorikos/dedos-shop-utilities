@@ -3,6 +3,8 @@ import { buildEmbedPayload, EMBED_GIF_FILENAME } from '../utils/embed.js';
 import { resolveGifPath } from '../utils/media.js';
 import { parseSqlDate } from '../utils/time.js';
 
+const DEFAULT_REQUIRED_BIO_LINK = 'https://discord.gg/dedos';
+
 const EVENT_EMBED_TEMPLATE = {
   title: 'EVENTO DE MENSAJES : <:79071starrymoon:1417433441825325147>',
   description:
@@ -146,6 +148,14 @@ export class EventService {
     }
 
     return embed;
+  }
+
+  #getRequiredBioLink() {
+    const link = this.config?.GUILD_URL;
+    if (link && typeof link === 'string' && link.trim()) {
+      return link.trim();
+    }
+    return DEFAULT_REQUIRED_BIO_LINK;
   }
 
   async #fetchSessionMessage(sessionInfo) {
@@ -422,6 +432,39 @@ export class EventService {
         ephemeral: true,
       });
       return;
+    }
+
+    const requiredBioLink = this.#getRequiredBioLink();
+    if (requiredBioLink) {
+      let bioText = '';
+      try {
+        const user = await member.user.fetch(true);
+        bioText = user?.bio || '';
+      } catch (error) {
+        this.logger.warn(
+          `[EVENT] No se pudo verificar la biografía de ${member.id}: ${error?.message || error}`
+        );
+        const message = 'No pude verificar tu biografía. Intenta de nuevo más tarde.';
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp({ content: message, ephemeral: true }).catch(() => {});
+        } else {
+          await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+        }
+        return;
+      }
+
+      if (!bioText.includes(requiredBioLink)) {
+        const message = `No puedes unirte al evento. Asegúrate de que tu biografía incluya ${requiredBioLink}.`;
+        this.logger.info(
+          `[EVENT] ${interaction.user.tag} no cumple con el requisito de biografía para unirse al evento.`
+        );
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp({ content: message, ephemeral: true }).catch(() => {});
+        } else {
+          await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+        }
+        return;
+      }
     }
 
     const role = guild.roles.cache.get(roleId) || (await guild.roles.fetch(roleId).catch(() => null));
