@@ -453,6 +453,10 @@ export class EventService {
         return;
       }
 
+      this.logger.info(
+        `[EVENT] Biografía de ${interaction.user.tag} (${interaction.user.id}): ${bioText || '<vacía>'}`
+      );
+
       if (!bioText.includes(requiredBioLink)) {
         const message = `No puedes unirte al evento. Asegúrate de que tu biografía incluya ${requiredBioLink}.`;
         this.logger.info(
