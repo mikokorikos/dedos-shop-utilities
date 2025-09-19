@@ -54,7 +54,11 @@ export default {
   usage: ';warn @usuario [--puntos <1-10>] [--contexto <url>] razón',
   aliases: [],
   async execute(message, args, { warnService, logger, config }) {
+    logger.info(
+      `[WARN COMMAND] ${message.author?.tag || message.author?.id} ejecutó warn con argumentos: ${args?.join(' ') || 'sin argumentos'}.`
+    );
     if (!hasModeratorAccess(message.member)) {
+      logger.warn('[WARN COMMAND] Usuario sin permisos intentó ejecutar warn.');
       await message
         .reply({
           content: 'Necesitas permisos de moderación para usar este comando.',
@@ -65,6 +69,7 @@ export default {
     }
 
     if (!args?.length) {
+      logger.warn('[WARN COMMAND] Warn sin argumentos.');
       await message
         .reply({
           content: buildUsageMessage(config.COMMAND_PREFIX),
@@ -76,6 +81,7 @@ export default {
 
     const userId = normalizeUserId(args[0]);
     if (!userId) {
+      logger.warn('[WARN COMMAND] No se pudo normalizar el usuario objetivo.');
       await message
         .reply({
           content: 'Debes mencionar a un usuario válido.',
@@ -89,6 +95,7 @@ export default {
     const reason = rest.join(' ').trim();
 
     if (!reason) {
+      logger.warn('[WARN COMMAND] Warn sin razón proporcionada.');
       await message
         .reply({
           content: 'Debes especificar una razón para la advertencia.',
@@ -99,6 +106,7 @@ export default {
     }
 
     if (Number.isNaN(points) || points < 1 || points > 10) {
+      logger.warn(`[WARN COMMAND] Puntos inválidos recibidos: ${points}.`);
       await message
         .reply({
           content: 'Los puntos deben ser un número entre 1 y 10.',
@@ -109,6 +117,7 @@ export default {
     }
 
     if (!warnService.enabled) {
+      logger.warn('[WARN COMMAND] WarnService no está habilitado.');
       await message
         .reply({
           content: 'El sistema de warns no está configurado.',
@@ -121,11 +130,16 @@ export default {
     let member;
     try {
       member = await message.guild.members.fetch(userId);
-    } catch {
+      logger.debug(`[WARN COMMAND] Miembro ${member.user?.tag || member.id} resuelto correctamente.`);
+    } catch (error) {
+      logger.error(
+        `[WARN COMMAND] No se pudo obtener al miembro ${userId}: ${error?.message || error}`
+      );
       member = null;
     }
 
     if (!member) {
+      logger.warn(`[WARN COMMAND] No se encontró al miembro ${userId}.`);
       await message
         .reply({
           content: 'No pude encontrar a ese miembro en el servidor.',
@@ -136,6 +150,7 @@ export default {
     }
 
     if (member.user.bot) {
+      logger.warn('[WARN COMMAND] Se intentó advertir a un bot.');
       await message
         .reply({
           content: 'No puedes advertir a un bot.',
@@ -162,17 +177,22 @@ export default {
         totalPoints: result.totalPoints,
       };
 
-      const embed = warnService.buildWarnEmbed({
+      const payload = warnService.createWarnChannelPayload({
         targetMember: member,
         moderator: message.member,
         reason,
         totals,
         points,
+        contextUrl: contextUrl ? `[Ver contexto](${contextUrl})` : undefined,
+        messageUrl: message.url,
       });
 
-      await message
-        .reply({ embeds: [embed], allowedMentions: { repliedUser: false } })
-        .catch(() => {});
+      await warnService.sendWarnToChannel({
+        channel: message.channel,
+        payload,
+        targetMember: member,
+      });
+
       await warnService.sendWarnDm({ member, reason, moderator: message.member, points });
     } catch (error) {
       logger.error('[WARN] Error registrando advertencia:', error);

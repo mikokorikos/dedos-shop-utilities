@@ -8,8 +8,12 @@ export default {
   description: 'Envía una advertencia verbal a un usuario sin registrarla en la base de datos.',
   usage: ';verbalwarn @usuario mensaje',
   aliases: ['verbal-warn'],
-  async execute(message, args, { warnService, config }) {
+  async execute(message, args, { warnService, config, logger }) {
+    logger.info(
+      `[VERBAL WARN COMMAND] ${message.author?.tag || message.author?.id} ejecutó verbalwarn con argumentos: ${args?.join(' ') || 'sin argumentos'}.`
+    );
     if (!hasModeratorAccess(message.member)) {
+      logger.warn('[VERBAL WARN COMMAND] Usuario sin permisos intentó ejecutar verbalwarn.');
       await message
         .reply({
           content: 'Necesitas permisos de moderación para usar este comando.',
@@ -20,6 +24,7 @@ export default {
     }
 
     if (!args?.length) {
+      logger.warn('[VERBAL WARN COMMAND] Comando sin argumentos.');
       await message
         .reply({
           content: usageMessage(config.COMMAND_PREFIX),
@@ -31,6 +36,7 @@ export default {
 
     const userId = normalizeUserId(args[0]);
     if (!userId) {
+      logger.warn('[VERBAL WARN COMMAND] No se pudo normalizar el usuario objetivo.');
       await message
         .reply({
           content: 'Debes mencionar a un usuario válido.',
@@ -42,6 +48,7 @@ export default {
 
     const reason = args.slice(1).join(' ').trim();
     if (!reason) {
+      logger.warn('[VERBAL WARN COMMAND] Falta el mensaje de advertencia.');
       await message
         .reply({
           content: 'Debes escribir un mensaje para la advertencia verbal.',
@@ -54,11 +61,18 @@ export default {
     let member;
     try {
       member = await message.guild.members.fetch(userId);
-    } catch {
+      logger.debug(
+        `[VERBAL WARN COMMAND] Miembro ${member.user?.tag || member.id} resuelto correctamente.`
+      );
+    } catch (error) {
+      logger.error(
+        `[VERBAL WARN COMMAND] No se pudo obtener al miembro ${userId}: ${error?.message || error}`
+      );
       member = null;
     }
 
     if (!member) {
+      logger.warn(`[VERBAL WARN COMMAND] No se encontró al miembro ${userId}.`);
       await message
         .reply({
           content: 'No pude encontrar a ese miembro en el servidor.',
@@ -69,6 +83,7 @@ export default {
     }
 
     if (member.user.bot) {
+      logger.warn('[VERBAL WARN COMMAND] Se intentó advertir a un bot.');
       await message
         .reply({
           content: 'No puedes advertir a un bot.',
