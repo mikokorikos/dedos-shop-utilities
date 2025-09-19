@@ -109,11 +109,6 @@ export class EventVerificationService {
       return;
     }
 
-    const requiredTag = await this.settingsService.get(
-      sessionRow.guild_id,
-      'event.required_tag',
-      this.config.EVENT_REQUIRED_TAG
-    );
     const controlChannelId = await this.settingsService.get(
       sessionRow.guild_id,
       'event.control_channel_id',
@@ -125,7 +120,6 @@ export class EventVerificationService {
         guild,
         sessionId: sessionRow.id,
         participant,
-        requiredTag,
         controlChannelId,
       }).catch((error) => {
         this.logger.error(`[#VERIFY] Error verificando ${participant.user_id}:`, error);
@@ -133,7 +127,7 @@ export class EventVerificationService {
     }
   }
 
-  async #verifyParticipant({ guild, sessionId, participant, requiredTag, controlChannelId }) {
+  async #verifyParticipant({ guild, sessionId, participant, controlChannelId }) {
     const member = await guild.members.fetch(participant.user_id).catch(() => null);
     if (!member) {
       this.logger.warn(`[VERIFY] Usuario ${participant.user_id} ya no está en el servidor. Expulsando del evento.`);
@@ -155,7 +149,7 @@ export class EventVerificationService {
       return;
     }
 
-    const check = await this.#evaluateMember(member, requiredTag);
+    const check = await this.#evaluateMember(member);
     const action = await this.#decideAction({
       guildId: guild.id,
       participant,
@@ -191,9 +185,9 @@ export class EventVerificationService {
     });
   }
 
-  async #evaluateMember(member, requiredTag) {
+  async #evaluateMember(member) {
     const nickname = member.nickname || member.user.globalName || member.user.username || '';
-    const tagOk = requiredTag ? nickname.includes(requiredTag) : true;
+    const tagOk = true;
 
     let bioText = '';
     try {
@@ -227,14 +221,13 @@ export class EventVerificationService {
   }
 
   async #decideAction({ guildId, participant, check }) {
-    const missingTag = !check.tagOk;
     const missingBio = !check.bioOk;
 
-    if (!missingTag && !missingBio) {
+    if (!missingBio) {
       return { type: VERIFICATION_ACTIONS.NONE, reason: null };
     }
 
-    const reason = missingTag ? VERIFICATION_REASONS.MISSING_TAG : VERIFICATION_REASONS.MISSING_BIO;
+    const reason = VERIFICATION_REASONS.MISSING_BIO;
     const counter = this.sanctionRepository?.enabled
       ? await this.sanctionRepository.getCounter({
           guildId,
