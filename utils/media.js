@@ -13,7 +13,9 @@ export const resolveGifPath = (envValue) => {
     candidates.push(
       'dedosgif.gif',
       path.join(process.cwd(), 'dedosgif.gif'),
-      path.join(process.cwd(), 'assets', 'dedosgif.gif')
+      path.join(process.cwd(), 'assets', 'dedosgif.gif'),
+      'dedosgift.gif',
+      path.join(process.cwd(), 'dedosgift.gif')
     );
 
     cachedGifPath = candidates.find((candidate) => candidate && fs.existsSync(candidate)) || null;
