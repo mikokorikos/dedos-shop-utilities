@@ -128,9 +128,9 @@ export class EventVerificationService {
         requiredTag,
         controlChannelId,
       }).catch((error) => {
-      this.logger.error(`[#VERIFY] Error verificando ${participant.user_id}:`, error);
-    });
-  }
+        this.logger.error(`[#VERIFY] Error verificando ${participant.user_id}:`, error);
+      });
+    }
   }
 
   async #verifyParticipant({ guild, sessionId, participant, requiredTag, controlChannelId }) {
@@ -148,7 +148,7 @@ export class EventVerificationService {
         userId: participant.user_id,
         tagOk: false,
         bioOk: false,
-        action: ACTIONS.EXPULSION,
+        action: VERIFICATION_ACTIONS.EXPULSION,
         details: 'Miembro ya no pertenece al servidor',
       });
       await this.eventService.removeParticipantByUserId({ sessionId, userId: participant.user_id });
