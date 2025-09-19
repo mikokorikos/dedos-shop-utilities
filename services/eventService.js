@@ -40,7 +40,6 @@ export class EventService {
     this.eventReminderState = new Map();
     this.reminderRoleWarningLogged = false;
     this.reminderChannelWarningLogged = false;
-    this.gifPath = null;
   }
 
   buildEventEmbed({ joinedUserIds = [], useAttachment = false } = {}) {
@@ -332,23 +331,7 @@ export class EventService {
     }
   }
 
-  #getGifPath() {
-    if (!this.gifPath) {
-      this.logger.debug('[REMINDER] Resolviendo ruta del gif de firma.');
-      this.gifPath = resolveGifPath(this.config.WELCOME_GIF);
-      if (!this.gifPath) {
-        this.logger.warn('[REMINDER] No se encontró dedosgif.gif. Se usará la URL de respaldo.');
-      } else {
-        this.logger.debug(`[REMINDER] Gif de firma localizado en ${this.gifPath}.`);
-      }
-    }
-    return this.gifPath;
-  }
-
   #buildReminderEmbed({ guild, member }) {
-    this.logger.debug(
-      `[REMINDER] Construyendo embed de recordatorio de canal para ${member.user?.tag || member.id}.`
-    );
     const eventChannelMention = this.config.EVENTS_CHANNEL_ID
       ? `<#${this.config.EVENTS_CHANNEL_ID}>`
       : 'el canal de eventos';
@@ -372,77 +355,6 @@ export class EventService {
         iconURL: this.config.EVENT_BRAND_ICON || this.config.BRAND_ICON,
       })
       .setTimestamp();
-  }
-
-  #buildReminderDmEmbed({ guild, member }) {
-    this.logger.debug(
-      `[REMINDER] Construyendo embed de recordatorio por DM para ${member.user?.tag || member.id}.`
-    );
-    const channelText = this.config.EVENTS_CHANNEL_ID
-      ? `visitar <#${this.config.EVENTS_CHANNEL_ID}>`
-      : 'revisar el canal de eventos';
-    return new EmbedBuilder()
-      .setColor(EVENT_EMBED_TEMPLATE.color || this.config.WARN_EMBED_COLOR || 0x5000ab)
-      .setTitle('¡Te esperamos en el evento!')
-      .setDescription(
-        [
-          `Hola ${member.displayName}, aún no vemos tu participación en los eventos de ${guild.name}.`,
-          `Puedes ${channelText} para enterarte de todos los detalles.`,
-        ].join('\n\n')
-      )
-      .setFooter({
-        text: 'Puedes responder este DM si necesitas ayuda.',
-        iconURL: this.config.EVENT_BRAND_ICON || this.config.BRAND_ICON,
-      })
-      .setTimestamp();
-  }
-
-  #createReminderChannelPayload({ embed, member, components }) {
-    const payload = buildEmbedPayload(embed, this.#getGifPath(), this.config.EVENT_REMINDER_GIF_URL, {
-      content: member.toString(),
-      components,
-      allowedMentions: { users: [member.id], roles: [] },
-    });
-    this.logger.debug(
-      `[REMINDER] Payload de canal preparado para ${member.user?.tag || member.id}.`
-    );
-    return payload;
-  }
-
-  #createReminderDmPayload({ guild, member }) {
-    const embed = this.#buildReminderDmEmbed({ guild, member });
-    const payload = buildEmbedPayload(embed, this.#getGifPath(), this.config.EVENT_REMINDER_GIF_URL);
-    this.logger.debug(`[REMINDER] Payload de DM preparado para ${member.user?.tag || member.id}.`);
-    return payload;
-  }
-
-  async #sendReminderToChannel({ channel, payload, member }) {
-    try {
-      this.logger.info(
-        `[REMINDER] Enviando recordatorio de canal a ${member.user?.tag || member.id} en #${channel.name || channel.id}.`
-      );
-      await channel.send(payload);
-      this.logger.info(
-        `[REMINDER] Recordatorio publicado para ${member.user?.tag || member.id} en #${channel.name || channel.id}.`
-      );
-    } catch (error) {
-      this.logger.error(
-        `[REMINDER] Error enviando recordatorio a ${member.user?.tag || member.id} en ${channel.id}: ${error?.message || error}`
-      );
-      throw error;
-    }
-  }
-
-  async #sendReminderDm({ member, payload }) {
-    try {
-      this.logger.info(`[REMINDER] Enviando recordatorio por DM a ${member.user?.tag || member.id}.`);
-      await member.send(payload);
-      this.logger.info(`[REMINDER] Recordatorio por DM enviado a ${member.user?.tag || member.id}.`);
-    } catch (error) {
-      this.logger.warn(
-        `[REMINDER] No se pudo enviar el recordatorio por DM a ${member.user?.tag || member.id}: ${error?.message || error}`
-      );
-    }
   }
 
   async handleReminderMessage(message) {
@@ -529,11 +441,8 @@ export class EventService {
         state.lastRemindedAt = new Date(now);
         await this.#markReminderSent(guildId, userId);
 
-        this.logger.info(
-          `[REMINDER] Programando recordatorio para ${member.user.tag} tras cumplir condiciones.`
-        );
-
         const embed = this.#buildReminderEmbed({ guild: message.guild, member });
+        const gifPath = resolveGifPath(this.config.WELCOME_GIF);
         const joinButton = new ButtonBuilder()
           .setCustomId(this.config.EVENT_JOIN_BUTTON_ID)
           .setStyle(ButtonStyle.Success)
@@ -544,19 +453,16 @@ export class EventService {
           .setLabel(this.config.EVENT_REMINDER_STOP_LABEL || 'No volver a recordar');
         const row = new ActionRowBuilder().addComponents(joinButton, stopButton);
 
-        const channelPayload = this.#createReminderChannelPayload({
-          embed,
-          member,
+        const payload = buildEmbedPayload(embed, gifPath, this.config.EVENT_REMINDER_GIF_URL, {
+          content: message.author.toString(),
           components: [row],
-        });
-        await this.#sendReminderToChannel({
-          channel: message.channel,
-          payload: channelPayload,
-          member,
+          allowedMentions: { users: [message.author.id], roles: [] },
         });
 
-        const dmPayload = this.#createReminderDmPayload({ guild: message.guild, member });
-        await this.#sendReminderDm({ member, payload: dmPayload });
+        await message.channel.send(payload);
+        this.logger.info(
+          `[REMINDER] Recordatorio enviado a ${member.user.tag} en #${message.channel.name || message.channel.id}.`
+        );
       } catch (error) {
         this.logger.error(
           `[REMINDER] Error enviando recordatorio a ${member.user.tag}: ${error?.message || error}`
