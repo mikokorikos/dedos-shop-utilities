@@ -32,14 +32,91 @@ const EVENT_EMBED_TEMPLATE = {
 const buildReminderKey = (guildId, userId) => `${guildId}:${userId}`;
 
 export class EventService {
-  constructor({ config, logger, db }) {
+  constructor({
+    config,
+    logger,
+    db,
+    sessionRepository,
+    participantRepository,
+    sanctionRepository,
+    settingsService,
+  }) {
     this.config = config;
     this.logger = logger;
     this.db = db;
+    this.sessionRepository = sessionRepository;
+    this.participantRepository = participantRepository;
+    this.sanctionRepository = sanctionRepository;
+    this.settingsService = settingsService;
     this.eventMessageState = new Map();
     this.eventReminderState = new Map();
     this.reminderRoleWarningLogged = false;
     this.reminderChannelWarningLogged = false;
+    this.gifPath = null;
+    this.client = null;
+    this.messageSessionMap = new Map();
+    this.sessionIndex = new Map();
+  }
+
+  #resolveSessionName() {
+    if (this.config.EVENT_SESSION_NAME) {
+      return this.config.EVENT_SESSION_NAME;
+    }
+    const now = new Date();
+    return `Evento ${now.toLocaleDateString('es-ES')}`;
+  }
+
+  async init(client) {
+    this.client = client;
+    this.gifPath = resolveGifPath(this.config.WELCOME_GIF);
+
+    if (!this.sessionRepository?.enabled) {
+      return;
+    }
+
+    const sessions = await this.sessionRepository.listActiveSessions();
+    for (const session of sessions) {
+      this.#cacheSessionReference({
+        sessionId: session.id,
+        guildId: session.guild_id,
+        channelId: session.channel_id,
+        messageId: session.message_id,
+      });
+
+      if (!session.message_id || !session.channel_id) {
+        continue;
+      }
+
+      const message = await this.#fetchSessionMessage(session).catch((error) => {
+        this.logger.warn(
+          `[EVENT] No se pudo recuperar el mensaje ${session.message_id} para la sesión ${session.id}: ${error?.message || error}`
+        );
+        return null;
+      });
+
+      if (!message) {
+        continue;
+      }
+
+      const state = this.#getEventStateForMessage(message, session.id);
+
+      if (state.joinedIds.size === 0 && this.participantRepository) {
+        const participants = await this.participantRepository
+          .listCurrentParticipants(session.id)
+          .catch(() => []);
+        for (const userId of participants) {
+          state.joinedIds.add(userId);
+        }
+        if (participants.length) {
+          await this.#refreshEventMessage(message, state).catch(() => {});
+        }
+      }
+    }
+  }
+
+  async getActiveSession(guildId) {
+    if (!this.sessionRepository?.enabled) return null;
+    return this.sessionRepository.findActiveSession(guildId);
   }
 
   buildEventEmbed({ joinedUserIds = [], useAttachment = false } = {}) {
@@ -71,7 +148,73 @@ export class EventService {
     return embed;
   }
 
-  #getEventStateForMessage(message) {
+  async #fetchSessionMessage(sessionInfo) {
+    if (!this.client) return null;
+    try {
+      const guildId = sessionInfo.guild_id || sessionInfo.guildId;
+      const channelId = sessionInfo.channel_id || sessionInfo.channelId;
+      const messageId = sessionInfo.message_id || sessionInfo.messageId;
+
+      const guild =
+        this.client.guilds.cache.get(guildId) ||
+        (await this.client.guilds.fetch(guildId));
+      const channel = await guild.channels.fetch(channelId);
+      if (!channel || !channel.isTextBased()) {
+        return null;
+      }
+      return await channel.messages.fetch(messageId);
+    } catch (error) {
+      this.logger.warn(
+        `[EVENT] No se pudo recuperar el mensaje ${(sessionInfo.message_id || sessionInfo.messageId) ?? 'desconocido'}: ${error?.message || error}`
+      );
+      return null;
+    }
+  }
+
+  async #refreshEventMessage(message, state) {
+    const updatedEmbed = this.buildEventEmbed({
+      joinedUserIds: Array.from(state.joinedIds),
+      useAttachment: state.useAttachment,
+    });
+    try {
+      await message.edit({ embeds: [updatedEmbed] });
+    } catch (error) {
+      this.logger.warn('[EVENT] No se pudo actualizar el panel del evento:', error);
+    }
+  }
+
+  async #disableJoinButton(message) {
+    if (!message?.components?.length) {
+      return;
+    }
+
+    try {
+      const newRows = message.components.map((row) => {
+        const builder = new ActionRowBuilder();
+        for (const component of row.components) {
+          if (component.type === 2) {
+            const cloned = ButtonBuilder.from(component);
+            if (component.customId === this.config.EVENT_JOIN_BUTTON_ID) {
+              cloned.setDisabled(true);
+            }
+            builder.addComponents(cloned);
+          }
+        }
+        return builder;
+      });
+      await message.edit({ components: newRows });
+    } catch (error) {
+      this.logger.warn('[EVENT] No se pudo deshabilitar el botón de unión:', error);
+    }
+  }
+
+  #cacheSessionReference({ sessionId, guildId, channelId, messageId, useAttachment }) {
+    if (!sessionId || !messageId) return;
+    this.sessionIndex.set(sessionId, { guildId, channelId, messageId, useAttachment: Boolean(useAttachment) });
+    this.messageSessionMap.set(messageId, sessionId);
+  }
+
+  #getEventStateForMessage(message, sessionId) {
     let state = this.eventMessageState.get(message.id);
     if (!state) {
       const embed = message.embeds?.[0];
@@ -80,9 +223,18 @@ export class EventService {
         Boolean(embed?.image?.url && embed.image.url.startsWith(`attachment://${EMBED_GIF_FILENAME}`)) ||
         Boolean(message.attachments?.some?.((attachment) => attachment.name === EMBED_GIF_FILENAME));
 
-      state = { joinedIds, useAttachment: usesAttachment };
+      const resolvedSessionId = sessionId || this.messageSessionMap.get(message.id) || null;
+      state = { joinedIds, useAttachment: usesAttachment, sessionId: resolvedSessionId };
       this.eventMessageState.set(message.id, state);
     }
+
+    if (sessionId && state.sessionId !== sessionId) {
+      state.sessionId = sessionId;
+      this.messageSessionMap.set(message.id, sessionId);
+    } else if (!state.sessionId && this.messageSessionMap.has(message.id)) {
+      state.sessionId = this.messageSessionMap.get(message.id);
+    }
+
     return state;
   }
 
@@ -129,7 +281,21 @@ export class EventService {
       }
     }
 
-    const gifPath = resolveGifPath(this.config.WELCOME_GIF);
+    if (this.sessionRepository?.enabled) {
+      const activeSession = await this.sessionRepository.findActiveSession(guild.id);
+      if (activeSession) {
+        await message
+          .reply({
+            content: 'Ya existe un evento activo. Finaliza el evento actual antes de publicar uno nuevo.',
+            allowedMentions: { repliedUser: false },
+          })
+          .catch(() => {});
+        return;
+      }
+    }
+
+    this.gifPath = this.gifPath || resolveGifPath(this.config.WELCOME_GIF);
+    const gifPath = this.gifPath;
     const embed = this.buildEventEmbed({ joinedUserIds: [], useAttachment: Boolean(gifPath) });
     const button = new ButtonBuilder()
       .setCustomId(this.config.EVENT_JOIN_BUTTON_ID)
@@ -144,10 +310,29 @@ export class EventService {
     try {
       const sent = await targetChannel.send(payload);
 
-      this.eventMessageState.set(sent.id, {
-        joinedIds: new Set(),
+      let sessionRecord = null;
+      if (this.sessionRepository?.enabled) {
+        sessionRecord = await this.sessionRepository.createSession({
+          guildId: guild.id,
+          name: this.#resolveSessionName(),
+          createdBy: message.author.id,
+          messageId: sent.id,
+          channelId: sent.channelId,
+        });
+      }
+
+      const sessionId = sessionRecord?.id || null;
+      this.#cacheSessionReference({
+        sessionId,
+        guildId: guild.id,
+        channelId: sent.channelId,
+        messageId: sent.id,
         useAttachment: Boolean(gifPath),
       });
+
+      const state = this.#getEventStateForMessage(sent, sessionId);
+      state.joinedIds = state.joinedIds || new Set();
+      state.useAttachment = Boolean(gifPath);
 
       const confirmation =
         targetChannel.id === message.channelId
@@ -169,6 +354,42 @@ export class EventService {
         })
         .catch(() => {});
     }
+  }
+
+  async finishActiveSession(guildId, moderatorId, reason) {
+    if (!this.sessionRepository?.enabled) {
+      return null;
+    }
+
+    const session = await this.sessionRepository.findActiveSession(guildId);
+    if (!session) {
+      return null;
+    }
+
+    await this.sessionRepository.finishSession({
+      sessionId: session.id,
+      finishedBy: moderatorId,
+      reason,
+    });
+
+    const sessionInfo = this.sessionIndex.get(session.id);
+    if (sessionInfo) {
+      const message = await this.#fetchSessionMessage({
+        guildId: sessionInfo.guildId,
+        channelId: sessionInfo.channelId,
+        messageId: sessionInfo.messageId,
+      });
+      if (message) {
+        await this.#disableJoinButton(message);
+      }
+    }
+
+    if (session.message_id) {
+      this.eventMessageState.delete(session.message_id);
+      this.messageSessionMap.delete(session.message_id);
+    }
+    this.sessionIndex.delete(session.id);
+    return session;
   }
 
   async handleJoin(interaction) {
@@ -226,19 +447,47 @@ export class EventService {
       }
     }
 
-    const state = this.#getEventStateForMessage(interaction.message);
+    const sessionId = this.messageSessionMap.get(interaction.message.id);
+    if (!sessionId && this.sessionRepository?.enabled) {
+      const session = await this.sessionRepository.findActiveSession(guild.id);
+      if (session) {
+        this.#cacheSessionReference({
+          sessionId: session.id,
+          guildId: guild.id,
+          channelId: interaction.channelId,
+          messageId: interaction.message.id,
+        });
+      }
+    }
+
+    const resolvedSessionId = this.messageSessionMap.get(interaction.message.id);
+
+    if (this.sanctionRepository?.enabled) {
+      const banned = await this.sanctionRepository.isPermanentlyBanned({
+        guildId: guild.id,
+        userId: interaction.user.id,
+      });
+      if (banned) {
+        await interaction.reply({
+          content: 'No puedes unirte al evento porque tienes un baneo permanente de eventos.',
+          ephemeral: true,
+        });
+        return;
+      }
+    }
+
+    if (resolvedSessionId && this.participantRepository?.enabled) {
+      await this.participantRepository.upsertParticipant({
+        sessionId: resolvedSessionId,
+        guildId: guild.id,
+        userId: interaction.user.id,
+      });
+    }
+
+    const state = this.#getEventStateForMessage(interaction.message, resolvedSessionId);
     state.joinedIds.add(interaction.user.id);
 
-    const updatedEmbed = this.buildEventEmbed({
-      joinedUserIds: Array.from(state.joinedIds),
-      useAttachment: state.useAttachment,
-    });
-
-    try {
-      await interaction.message.edit({ embeds: [updatedEmbed] });
-    } catch (error) {
-      this.logger.warn('[EVENT] No se pudo actualizar el mensaje del evento:', error);
-    }
+    await this.#refreshEventMessage(interaction.message, state);
 
     const response = alreadyHasRole
       ? 'Ya estabas inscrito en el evento. ¡Nos vemos ahí!'
@@ -331,7 +580,23 @@ export class EventService {
     }
   }
 
+  #getGifPath() {
+    if (!this.gifPath) {
+      this.logger.debug('[REMINDER] Resolviendo ruta del gif de firma.');
+      this.gifPath = resolveGifPath(this.config.WELCOME_GIF);
+      if (!this.gifPath) {
+        this.logger.warn('[REMINDER] No se encontró dedosgif.gif. Se usará la URL de respaldo.');
+      } else {
+        this.logger.debug(`[REMINDER] Gif de firma localizado en ${this.gifPath}.`);
+      }
+    }
+    return this.gifPath;
+  }
+
   #buildReminderEmbed({ guild, member }) {
+    this.logger.debug(
+      `[REMINDER] Construyendo embed de recordatorio de canal para ${member.user?.tag || member.id}.`
+    );
     const eventChannelMention = this.config.EVENTS_CHANNEL_ID
       ? `<#${this.config.EVENTS_CHANNEL_ID}>`
       : 'el canal de eventos';
@@ -355,6 +620,77 @@ export class EventService {
         iconURL: this.config.EVENT_BRAND_ICON || this.config.BRAND_ICON,
       })
       .setTimestamp();
+  }
+
+  #buildReminderDmEmbed({ guild, member }) {
+    this.logger.debug(
+      `[REMINDER] Construyendo embed de recordatorio por DM para ${member.user?.tag || member.id}.`
+    );
+    const channelText = this.config.EVENTS_CHANNEL_ID
+      ? `visitar <#${this.config.EVENTS_CHANNEL_ID}>`
+      : 'revisar el canal de eventos';
+    return new EmbedBuilder()
+      .setColor(EVENT_EMBED_TEMPLATE.color || this.config.WARN_EMBED_COLOR || 0x5000ab)
+      .setTitle('¡Te esperamos en el evento!')
+      .setDescription(
+        [
+          `Hola ${member.displayName}, aún no vemos tu participación en los eventos de ${guild.name}.`,
+          `Puedes ${channelText} para enterarte de todos los detalles.`,
+        ].join('\n\n')
+      )
+      .setFooter({
+        text: 'Puedes responder este DM si necesitas ayuda.',
+        iconURL: this.config.EVENT_BRAND_ICON || this.config.BRAND_ICON,
+      })
+      .setTimestamp();
+  }
+
+  #createReminderChannelPayload({ embed, member, components }) {
+    const payload = buildEmbedPayload(embed, this.#getGifPath(), this.config.EVENT_REMINDER_GIF_URL, {
+      content: member.toString(),
+      components,
+      allowedMentions: { users: [member.id], roles: [] },
+    });
+    this.logger.debug(
+      `[REMINDER] Payload de canal preparado para ${member.user?.tag || member.id}.`
+    );
+    return payload;
+  }
+
+  #createReminderDmPayload({ guild, member }) {
+    const embed = this.#buildReminderDmEmbed({ guild, member });
+    const payload = buildEmbedPayload(embed, this.#getGifPath(), this.config.EVENT_REMINDER_GIF_URL);
+    this.logger.debug(`[REMINDER] Payload de DM preparado para ${member.user?.tag || member.id}.`);
+    return payload;
+  }
+
+  async #sendReminderToChannel({ channel, payload, member }) {
+    try {
+      this.logger.info(
+        `[REMINDER] Enviando recordatorio de canal a ${member.user?.tag || member.id} en #${channel.name || channel.id}.`
+      );
+      await channel.send(payload);
+      this.logger.info(
+        `[REMINDER] Recordatorio publicado para ${member.user?.tag || member.id} en #${channel.name || channel.id}.`
+      );
+    } catch (error) {
+      this.logger.error(
+        `[REMINDER] Error enviando recordatorio a ${member.user?.tag || member.id} en ${channel.id}: ${error?.message || error}`
+      );
+      throw error;
+    }
+  }
+
+  async #sendReminderDm({ member, payload }) {
+    try {
+      this.logger.info(`[REMINDER] Enviando recordatorio por DM a ${member.user?.tag || member.id}.`);
+      await member.send(payload);
+      this.logger.info(`[REMINDER] Recordatorio por DM enviado a ${member.user?.tag || member.id}.`);
+    } catch (error) {
+      this.logger.warn(
+        `[REMINDER] No se pudo enviar el recordatorio por DM a ${member.user?.tag || member.id}: ${error?.message || error}`
+      );
+    }
   }
 
   async handleReminderMessage(message) {
@@ -441,8 +777,11 @@ export class EventService {
         state.lastRemindedAt = new Date(now);
         await this.#markReminderSent(guildId, userId);
 
+        this.logger.info(
+          `[REMINDER] Programando recordatorio para ${member.user.tag} tras cumplir condiciones.`
+        );
+
         const embed = this.#buildReminderEmbed({ guild: message.guild, member });
-        const gifPath = resolveGifPath(this.config.WELCOME_GIF);
         const joinButton = new ButtonBuilder()
           .setCustomId(this.config.EVENT_JOIN_BUTTON_ID)
           .setStyle(ButtonStyle.Success)
@@ -453,16 +792,19 @@ export class EventService {
           .setLabel(this.config.EVENT_REMINDER_STOP_LABEL || 'No volver a recordar');
         const row = new ActionRowBuilder().addComponents(joinButton, stopButton);
 
-        const payload = buildEmbedPayload(embed, gifPath, this.config.EVENT_REMINDER_GIF_URL, {
-          content: message.author.toString(),
+        const channelPayload = this.#createReminderChannelPayload({
+          embed,
+          member,
           components: [row],
-          allowedMentions: { users: [message.author.id], roles: [] },
+        });
+        await this.#sendReminderToChannel({
+          channel: message.channel,
+          payload: channelPayload,
+          member,
         });
 
-        await message.channel.send(payload);
-        this.logger.info(
-          `[REMINDER] Recordatorio enviado a ${member.user.tag} en #${message.channel.name || message.channel.id}.`
-        );
+        const dmPayload = this.#createReminderDmPayload({ guild: message.guild, member });
+        await this.#sendReminderDm({ member, payload: dmPayload });
       } catch (error) {
         this.logger.error(
           `[REMINDER] Error enviando recordatorio a ${member.user.tag}: ${error?.message || error}`
@@ -519,6 +861,29 @@ export class EventService {
       } else {
         await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
       }
+    }
+  }
+
+  async removeParticipantByUserId({ sessionId, userId }) {
+    const sessionInfo = this.sessionIndex.get(sessionId);
+    if (!sessionInfo) {
+      return;
+    }
+
+    const message = await this.#fetchSessionMessage({
+      guildId: sessionInfo.guildId,
+      channelId: sessionInfo.channelId,
+      messageId: sessionInfo.messageId,
+    });
+
+    if (!message) {
+      return;
+    }
+
+    const state = this.#getEventStateForMessage(message, sessionId);
+    if (state.joinedIds.has(userId)) {
+      state.joinedIds.delete(userId);
+      await this.#refreshEventMessage(message, state);
     }
   }
 }
