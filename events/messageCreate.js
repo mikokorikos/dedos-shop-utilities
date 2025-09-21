@@ -2,13 +2,7 @@ export default {
   name: 'messageCreate',
   once: false,
   async execute(message, context) {
-    const { eventService, config, commands, logger } = context;
-
-    try {
-      await eventService.handleReminderMessage(message);
-    } catch (error) {
-      logger.error('[EVENT] Error procesando recordatorio:', error);
-    }
+    const { config, commands, logger } = context;
 
     if (!message || message.author?.bot) {
       return;

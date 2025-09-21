@@ -2,7 +2,7 @@ export default {
   name: 'interactionCreate',
   once: false,
   async execute(interaction, context) {
-    const { logger, ticketService, eventService, verificationService, helpService, config } = context;
+    const { logger, ticketService, verificationService, helpService, config } = context;
 
     try {
       if (interaction.isStringSelectMenu()) {
@@ -37,14 +37,6 @@ export default {
       }
 
       if (interaction.isButton()) {
-        if (interaction.customId === config.EVENT_JOIN_BUTTON_ID) {
-          await eventService.handleJoin(interaction);
-          return;
-        }
-        if (interaction.customId === config.EVENT_REMINDER_STOP_BUTTON_ID) {
-          await eventService.handleReminderStop(interaction);
-          return;
-        }
         if (interaction.customId === config.TICKET_CLOSE_BUTTON_ID) {
           await ticketService.closeTicket(interaction);
           return;

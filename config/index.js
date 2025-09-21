@@ -56,34 +56,6 @@ const config = {
     'https://media.tenor.com/XlKJsteVEhAAAAAC/anime-warning.gif',
   WARN_HISTORY_PAGE_SIZE: Math.max(1, parseIntEnv(process.env.WARN_HISTORY_PAGE_SIZE, 6)),
 
-  EVENT_ROLE_ID:
-    sanitizeEnvValue(process.env.EVENTO_ROLE_ID) ||
-    sanitizeEnvValue(process.env.EVENT_ROLE_ID),
-  EVENTS_CHANNEL_ID:
-    sanitizeEnvValue(process.env.EVENTOS_CHANNEL_ID) ||
-    sanitizeEnvValue(process.env.EVENT_CHANNEL_ID),
-  EVENT_BUTTON_LABEL:
-    sanitizeEnvValue(process.env.EVENTO_BUTTON_LABEL) ||
-    sanitizeEnvValue(process.env.EVENT_PANEL_BUTTON_LABEL) ||
-    'Unirme al evento',
-  EVENT_REMINDER_CHANNEL_IDS: parseIdListEnv(process.env.EVENT_REMINDER_CHANNEL_IDS),
-  EVENT_REMINDER_COOLDOWN_MS: Math.max(
-    0,
-    parseIntEnv(process.env.EVENT_REMINDER_COOLDOWN_MINUTES, 720) * 60_000
-  ),
-  EVENT_REMINDER_MESSAGE_THRESHOLD: Math.max(
-    1,
-    parseIntEnv(process.env.EVENT_REMINDER_MESSAGE_THRESHOLD, 1)
-  ),
-  EVENT_REMINDER_GIF_URL:
-    sanitizeEnvValue(process.env.EVENT_REMINDER_GIF_URL) ||
-    'https://message.style/cdn/images/b6b34048e6b8e4f2d6931af81a6935dbeb06d1d1a619dcf353733ab75bbcca8c.gif',
-  EVENT_REMINDER_JOIN_LABEL:
-    sanitizeEnvValue(process.env.EVENT_REMINDER_JOIN_LABEL) || 'Ir al evento',
-  EVENT_REMINDER_STOP_LABEL:
-    sanitizeEnvValue(process.env.EVENT_REMINDER_STOP_LABEL) || 'No volver a recordar',
-  EVENT_BRAND_ICON: sanitizeEnvValue(process.env.EVENT_BRAND_ICON),
-  EVENT_SESSION_NAME: sanitizeEnvValue(process.env.EVENT_SESSION_NAME),
   TICKET_PANEL_CHANNEL_ID: sanitizeEnvValue(process.env.TICKET_PANEL_CHANNEL_ID),
   TICKET_CATEGORY_ID: sanitizeEnvValue(process.env.TICKET_CATEGORY_ID),
   TICKET_STAFF_ROLE_IDS: parseIdListEnv(
@@ -101,8 +73,6 @@ const config = {
   TICKET_SELECT_ID: 'dedos_ticket_menu',
   TICKET_BUTTON_PREFIX: 'dedos_ticket_open_',
   TICKET_CLOSE_BUTTON_ID: 'dedos_ticket_close',
-  EVENT_JOIN_BUTTON_ID: 'dedos_event_join',
-  EVENT_REMINDER_STOP_BUTTON_ID: 'dedos_event_reminder_stop',
   VERIFY_BUTTON_ID: 'dedos_verify_me',
   HELP_MENU_ID: 'menu_inquietudes',
 };

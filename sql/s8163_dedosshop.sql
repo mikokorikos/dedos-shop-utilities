@@ -4,7 +4,6 @@ SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 SET time_zone = "+00:00";
 
 DROP VIEW IF EXISTS `warns_summary`;
-DROP TABLE IF EXISTS `event_reminders`;
 DROP TABLE IF EXISTS `warns`;
 DROP TABLE IF EXISTS `guild_members`;
 DROP TABLE IF EXISTS `discord_users`;
@@ -66,22 +65,6 @@ CREATE TABLE `warns` (
   CONSTRAINT `fk_warns_guild` FOREIGN KEY (`guild_id`) REFERENCES `discord_guilds` (`guild_id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_warns_user` FOREIGN KEY (`user_id`) REFERENCES `discord_users` (`user_id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_warns_moderator` FOREIGN KEY (`moderator_id`) REFERENCES `discord_users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE `event_reminders` (
-  `guild_id` varchar(32) NOT NULL,
-  `user_id` varchar(32) NOT NULL,
-  `last_channel_id` varchar(32) DEFAULT NULL,
-  `last_message_id` varchar(32) DEFAULT NULL,
-  `last_reminded_at` datetime DEFAULT NULL,
-  `opted_out_at` datetime DEFAULT NULL,
-  `reminder_count` int unsigned NOT NULL DEFAULT 0,
-  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
-  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-  PRIMARY KEY (`guild_id`,`user_id`),
-  KEY `idx_event_reminders_last` (`last_reminded_at`),
-  KEY `idx_event_reminders_opt_out` (`opted_out_at`),
-  CONSTRAINT `fk_event_reminders_member` FOREIGN KEY (`guild_id`, `user_id`) REFERENCES `guild_members` (`guild_id`, `user_id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE OR REPLACE VIEW `warns_summary` AS

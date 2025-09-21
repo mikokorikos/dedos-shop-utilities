@@ -1,17 +1,11 @@
 export class AmnestyService {
   constructor({
     warnService,
-    participantRepository,
-    sanctionRepository,
     staffActionRepository,
-    settingsService,
     logger,
   }) {
     this.warnService = warnService;
-    this.participantRepository = participantRepository;
-    this.sanctionRepository = sanctionRepository;
     this.staffActionRepository = staffActionRepository;
-    this.settingsService = settingsService;
     this.logger = logger;
   }
 
@@ -51,38 +45,4 @@ export class AmnestyService {
     return removed;
   }
 
-  async clearVerificationCounters({ guildId, userId, reasonKey, moderatorId, sessionId }) {
-    const reason = reasonKey || null;
-    this.logger.info(
-      `[AMNESTY] Restableciendo contadores de verificación (${reason || 'todos'}) para ${userId}.`
-    );
-    await this.sanctionRepository.clearCounters({ guildId, userId, reason });
-    if (sessionId) {
-      await this.participantRepository.clearState({ sessionId, userId }).catch(() => {});
-    }
-    await this.staffActionRepository.logAmnesty({
-      guildId,
-      moderatorId,
-      userId,
-      action: reason ? 'remove_verification_warn' : 'reset_verification',
-      reason,
-      reference: sessionId ? `session:${sessionId}` : null,
-    });
-  }
-
-  async unbanParticipant({ guildId, userId, moderatorId, sessionId }) {
-    this.logger.info(`[AMNESTY] Levantando baneo de eventos para ${userId} en ${guildId}.`);
-    await this.sanctionRepository.clearCounters({ guildId, userId });
-    if (sessionId) {
-      await this.participantRepository.clearState({ sessionId, userId }).catch(() => {});
-    }
-    await this.staffActionRepository.logAmnesty({
-      guildId,
-      moderatorId,
-      userId,
-      action: 'event_unban',
-      reason: null,
-      reference: sessionId ? `session:${sessionId}` : null,
-    });
-  }
 }
