@@ -50,7 +50,7 @@ export class WelcomeService {
       'Primero verifica para obtener acceso a los canales:',
       `[#verificación](${verificationLink}) - [#invitación](${inviteLink})`,
       '',
-      'Aquí siempre tenemos eventos activos.',
+      'Revisa los canales fijados para conocer reglas y anuncios importantes.',
       'Más info: consulta el canal de información del servidor.',
       'Soporte: usa el canal de ayuda.',
       '',

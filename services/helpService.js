@@ -9,33 +9,19 @@ export class HelpService {
 
   buildHelpMenu() {
     return [
-      { label: '¿Qué son los eventos?', value: 'eventos' },
-      { label: '¿Qué se puede hacer en el servidor?', value: 'servidor' },
       { label: '¿Cómo verificarse?', value: 'verificacion' },
+      { label: '¿Qué se puede hacer en el servidor?', value: 'servidor' },
+      { label: '¿Cómo comprar?', value: 'compras' },
     ];
   }
 
   buildResponse(option, verificationMessageId, guildId) {
     let embed;
-    if (option === 'eventos') {
-      embed = new EmbedBuilder()
-        .setTitle('Eventos y premios')
-        .setDescription(
-          'Los eventos son dinámicas especiales que premian a los usuarios más activos del servidor.\n\n' +
-            '**Siempre hay eventos en curso.**\n\n' +
-            'Para ver los eventos actuales:\n' +
-            '- Revisa el canal de anuncios (desbloqueado tras verificarte).\n' +
-            '- Encontrarás toda la información: reglas, fechas, cómo participar y premios.'
-        )
-        .setColor(0x5000ab);
-    }
-
     if (option === 'servidor') {
       embed = new EmbedBuilder()
         .setTitle('¿Qué puedo hacer en el servidor?')
         .setDescription(
           'Estas son las principales actividades dentro del servidor:\n\n' +
-            '- Participa en eventos y gana recompensas por tu actividad.\n' +
             '- Usa nuestro middleman oficial sin propinas obligatorias.\n' +
             '- Compra en la tienda con los mejores precios del mercado.\n' +
             '- Convive, tradea y aporta sugerencias para seguir creciendo.'
@@ -51,6 +37,18 @@ export class HelpService {
       embed = new EmbedBuilder()
         .setTitle('Verificación')
         .setDescription(`Para verificarte, usa el botón del mensaje en ${enlace}.`)
+        .setColor(0x5000ab);
+    }
+
+    if (option === 'compras') {
+      embed = new EmbedBuilder()
+        .setTitle('Compras y soporte')
+        .setDescription(
+          'Nuestro equipo administra compras seguras dentro del servidor.\n\n' +
+            '- Abre un ticket para iniciar una compra o solicitar soporte.\n' +
+            '- Sigue las indicaciones del staff para completar tu pedido.\n' +
+            '- Revisa los canales fijados para conocer precios y promociones vigentes.'
+        )
         .setColor(0x5000ab);
     }
 
