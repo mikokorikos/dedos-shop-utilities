@@ -1,14 +1,16 @@
 {
-  "name": "discord-js-example-vexyhost",
+  "name": "dedos-bienvenidas-bot",
   "version": "1.0.0",
-  "description": "",
+  "description": "Bot de Discord para enviar bienvenida por DM con cola y tolerancia a fallos",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
-  "author": "",
-  "license": "ISC",
+  "engines": {
+    "node": ">=18.17.0"
+  },
   "dependencies": {
-    "discord.js": "latest"
+    "discord.js": "^14.22.1",
+    "dotenv": "^16.4.5"
   }
 }
