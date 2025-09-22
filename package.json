@@ -1,16 +1,21 @@
 {
-  "name": "dedos-bienvenidas-bot",
+  "name": "dedos-shop-bot",
   "version": "1.0.0",
-  "description": "Bot de Discord para enviar bienvenida por DM con cola y tolerancia a fallos",
+  "description": "Bot modular para Dedos Shop con middleman, warns, tickets y MySQL",
+  "type": "module",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "register:commands": "node scripts/register-commands.js"
   },
   "engines": {
     "node": ">=18.17.0"
   },
   "dependencies": {
+    "dayjs": "^1.11.11",
     "discord.js": "^14.22.1",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "mysql2": "^3.11.0",
+    "p-retry": "^6.0.1"
   }
 }
