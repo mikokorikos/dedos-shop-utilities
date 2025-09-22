@@ -165,8 +165,16 @@ async function createMiddlemanChannel({ interaction, partnerMember, context }) {
   const parent = CONFIG.MIDDLEMAN.CATEGORY_ID ?? interaction.channel?.parentId ?? null;
   const overwrites = [
     { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-    { id: ownerMember.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-    { id: partnerMember.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+    {
+      id: ownerMember.id,
+      allow: [PermissionFlagsBits.ViewChannel],
+      deny: [PermissionFlagsBits.SendMessages],
+    },
+    {
+      id: partnerMember.id,
+      allow: [PermissionFlagsBits.ViewChannel],
+      deny: [PermissionFlagsBits.SendMessages],
+    },
   ];
   if (CONFIG.ADMIN_ROLE_ID) {
     overwrites.push({ id: CONFIG.ADMIN_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
@@ -213,15 +221,16 @@ async function createMiddlemanChannel({ interaction, partnerMember, context }) {
 export async function handleMiddlemanModal(interaction) {
   const partnerInput = interaction.fields.getTextInputValue('partner');
   const context = interaction.fields.getTextInputValue('context');
+  await interaction.deferReply({ ephemeral: true });
   const partnerMember = await resolvePartnerMember(interaction.guild, partnerInput);
   if (!partnerMember) {
     const errorEmbed = buildTradeUpdateEmbed('❌ No encontramos al partner', 'Verifica que esté en el servidor e intenta de nuevo.');
-    await interaction.reply({ ...errorEmbed, ephemeral: true });
+    await interaction.editReply({ ...errorEmbed });
     return;
   }
   if (partnerMember.id === interaction.user.id) {
     const errorEmbed = buildTradeUpdateEmbed('❌ Partner inválido', 'Debes indicar a otra persona para abrir el middleman.');
-    await interaction.reply({ ...errorEmbed, ephemeral: true });
+    await interaction.editReply({ ...errorEmbed });
     return;
   }
   let channel;
@@ -233,11 +242,11 @@ export async function handleMiddlemanModal(interaction) {
       '❌ No se pudo crear el canal',
       'Verifica los permisos del bot e intenta nuevamente o abre un ticket con el staff.'
     );
-    await interaction.reply({ ...errorEmbed, ephemeral: true });
+    await interaction.editReply({ ...errorEmbed });
     return;
   }
   const confirmation = buildTradeUpdateEmbed('✅ Middleman creado', `Se creó el canal ${channel} y se notificó a tu partner.`);
-  await interaction.reply({ ...confirmation, ephemeral: true, allowedMentions: { users: [partnerMember.id] } });
+  await interaction.editReply({ ...confirmation, allowedMentions: { users: [partnerMember.id] } });
   logger.flow('Middleman creado', interaction.user.id, '->', partnerMember.id, 'canal', channel.id);
 }
 
