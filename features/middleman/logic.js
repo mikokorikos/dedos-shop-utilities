@@ -73,6 +73,45 @@ async function fetchParticipants(guild, ticket) {
   };
 }
 
+const SNOWFLAKE_REGEX = /^\d{17,20}$/;
+
+function normalizeSnowflake(value) {
+  if (!value && value !== 0) {
+    return null;
+  }
+  const id = String(value);
+  return SNOWFLAKE_REGEX.test(id) ? id : null;
+}
+
+function resolveParticipantIds(ticket, participants) {
+  const ownerId = normalizeSnowflake(ticket?.owner_id) ?? normalizeSnowflake(participants.owner?.id);
+  let partnerId = null;
+  if (Array.isArray(participants?.participantIds)) {
+    partnerId = participants.participantIds
+      .map((id) => normalizeSnowflake(id))
+      .find((id) => id && id !== ownerId)
+      ?? null;
+  }
+  if (!partnerId) {
+    const fallbackPartnerId = normalizeSnowflake(participants.partner?.id);
+    partnerId = fallbackPartnerId && fallbackPartnerId !== ownerId ? fallbackPartnerId : null;
+  }
+  return { ownerId, partnerId };
+}
+
+async function updateSendPermission(channel, userId, value) {
+  if (!userId) {
+    return false;
+  }
+  try {
+    await channel.permissionOverwrites.edit(userId, { SendMessages: value });
+    return true;
+  } catch (error) {
+    logger.warn('No se pudo actualizar permisos para el usuario', userId, error);
+    return false;
+  }
+}
+
 async function ensurePanelMessage(channel, { owner, partner, disabled } = {}) {
   const ticket = await getTicketByChannel(channel.id);
   if (!ticket) {
@@ -301,10 +340,18 @@ export async function handleTradeConfirm(interaction) {
   await interaction.reply({ ...buildTradeUpdateEmbed('✅ Confirmado', 'Tu confirmación quedó registrada. Espera a que la otra parte confirme.'), ephemeral: true });
   const trades = await getTradesByTicket(ticket.id);
   if (trades.every((t) => t.confirmed)) {
-    await interaction.channel.permissionOverwrites.edit(participants.owner.id, { SendMessages: false });
-    await interaction.channel.permissionOverwrites.edit(participants.partner.id, { SendMessages: false });
+    const { ownerId, partnerId } = resolveParticipantIds(ticket, participants);
+    const targetsToLock = [ownerId, partnerId].filter(Boolean);
+    if (targetsToLock.length === 0) {
+      logger.warn('No se encontraron participantes válidos para bloquear el canal middleman', ticket.id, interaction.channel.id);
+    }
+    await Promise.all(targetsToLock.map((id) => updateSendPermission(interaction.channel, id, false)));
     await ensurePanelMessage(interaction.channel, { owner: participants.owner, partner: participants.partner, disabled: true });
-    await interaction.followUp({ ...buildTradeLockedEmbed(CONFIG.MM_ROLE_ID), allowedMentions: { roles: CONFIG.MM_ROLE_ID ? [CONFIG.MM_ROLE_ID] : [] } });
+    await interaction.followUp({
+      ...buildTradeLockedEmbed(CONFIG.MM_ROLE_ID),
+      allowedMentions: { roles: CONFIG.MM_ROLE_ID ? [CONFIG.MM_ROLE_ID] : [] },
+      ephemeral: false,
+    });
   }
 }
 
@@ -315,15 +362,17 @@ export async function handleTradeHelp(interaction) {
     return;
   }
   const participants = await fetchParticipants(interaction.guild, ticket);
-  const trades = await getTradesByTicket(ticket.id);
-  await interaction.channel.permissionOverwrites.edit(participants.owner.id, { SendMessages: true });
-  await interaction.channel.permissionOverwrites.edit(participants.partner.id, { SendMessages: true });
+  const { ownerId, partnerId } = resolveParticipantIds(ticket, participants);
+  const targetsToUnlock = [ownerId, partnerId].filter(Boolean);
+  if (targetsToUnlock.length === 0) {
+    logger.warn('No se encontraron participantes válidos para desbloquear el canal middleman', ticket.id, interaction.channel.id);
+  }
+  await Promise.all(targetsToUnlock.map((id) => updateSendPermission(interaction.channel, id, true)));
   const help = buildHelpEmbed(CONFIG.ADMIN_ROLE_ID);
   await interaction.reply({ ...help, allowedMentions: { roles: CONFIG.ADMIN_ROLE_ID ? [CONFIG.ADMIN_ROLE_ID] : [] } });
   setTimeout(async () => {
     try {
-      await interaction.channel.permissionOverwrites.edit(participants.owner.id, { SendMessages: false });
-      await interaction.channel.permissionOverwrites.edit(participants.partner.id, { SendMessages: false });
+      await Promise.all(targetsToUnlock.map((id) => updateSendPermission(interaction.channel, id, false)));
       const updatedTrades = await getTradesByTicket(ticket.id);
       await ensurePanelMessage(interaction.channel, {
         owner: participants.owner,
