@@ -1,8 +1,19 @@
+import { adminFeature } from './admin/index.js';
 import { middlemanFeature } from './middleman/index.js';
 import { ticketsFeature } from './tickets/index.js';
 import { warnsFeature } from './warns/index.js';
+import { logger } from '../utils/logger.js';
 
-export const FEATURES = [middlemanFeature, ticketsFeature, warnsFeature];
+export const FEATURES = [adminFeature, middlemanFeature, ticketsFeature, warnsFeature];
+
+function registerCommand(map, command, type) {
+  if (map.has(command.name)) {
+    const message = `El comando ${type} "${command.name}" ya está registrado.`;
+    logger.error(message);
+    throw new Error(message);
+  }
+  map.set(command.name, command.execute);
+}
 
 export async function dispatchFeatureInteraction(interaction) {
   for (const feature of FEATURES) {
@@ -19,7 +30,7 @@ export function buildSlashCommandMap() {
   for (const feature of FEATURES) {
     for (const command of feature.commands ?? []) {
       if (command.type === 'slash') {
-        map.set(command.name, command.execute);
+        registerCommand(map, command, 'slash');
       }
     }
   }
@@ -31,7 +42,7 @@ export function buildPrefixCommandMap() {
   for (const feature of FEATURES) {
     for (const command of feature.commands ?? []) {
       if (command.type === 'prefix') {
-        map.set(command.name, command.execute);
+        registerCommand(map, command, 'prefijo');
       }
     }
   }

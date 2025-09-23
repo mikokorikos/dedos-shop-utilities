@@ -374,19 +374,41 @@ async function handleMmAdd(ctx, args, { isSlash }) {
     await sendCommandReply(ctx, { ...buildRobloxErrorEmbed(username) }, { ephemeral: isSlash });
     return;
   }
+  const existing = await getMiddlemanByDiscordId(userId);
   await ensureUser(userId);
+  const sameData =
+    existing &&
+    existing.roblox_username?.toLowerCase?.() === lookup.user.name.toLowerCase() &&
+    String(existing.roblox_user_id ?? '') === String(lookup.user.id ?? '');
+  const tag = await resolveUserTag(ctx.client, userId);
+  if (sameData) {
+    const embed = buildTradeUpdateEmbed(
+      'ℹ️ Middleman ya registrado',
+      [`${tag} ya está registrado como middleman.`, `Roblox actual: **${existing.roblox_username}** (${existing.roblox_user_id ?? 'sin ID'})`].join('\n')
+    );
+    await sendCommandReply(ctx, embed, { ephemeral: isSlash });
+    return;
+  }
   await upsertMiddleman({
     discordUserId: userId,
     robloxUsername: lookup.user.name,
     robloxUserId: lookup.user.id,
   });
-  const tag = await resolveUserTag(ctx.client, userId);
   const embed = buildTradeUpdateEmbed(
-    '✅ Middleman registrado',
-    [`Se registró ${tag} como middleman.`, `Roblox: **${lookup.user.name}** (${lookup.user.id})`].join('\n')
+    existing
+      ? '🔁 Middleman actualizado'
+      : '✅ Middleman registrado',
+    existing
+      ? [`Se actualizó la información de ${tag}.`, `Roblox ahora es **${lookup.user.name}** (${lookup.user.id}).`].join('\n')
+      : [`Se registró ${tag} como middleman.`, `Roblox: **${lookup.user.name}** (${lookup.user.id})`].join('\n')
   );
   await sendCommandReply(ctx, embed, { ephemeral: isSlash });
-  logger.flow('Middleman agregado/actualizado', userId, 'por', ctx.user?.id ?? ctx.author?.id);
+  logger.flow(
+    existing ? 'Middleman actualizado via add' : 'Middleman agregado',
+    userId,
+    'por',
+    ctx.user?.id ?? ctx.author?.id
+  );
 }
 
 async function handleMmSet(ctx, args, { isSlash }) {

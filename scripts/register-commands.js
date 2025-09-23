@@ -1,7 +1,14 @@
 import 'dotenv/config';
 import { REST, Routes, SlashCommandBuilder } from 'discord.js';
 
-const commands = [
+const ENTITY_CHOICES = [
+  { name: 'Usuarios', value: 'users' },
+  { name: 'Middlemans', value: 'middlemen' },
+  { name: 'Warns', value: 'warns' },
+  { name: 'Tickets', value: 'tickets' },
+];
+
+const commandBuilders = [
   new SlashCommandBuilder().setName('middleman').setDescription('Publicar panel de middleman (solo admin)'),
   new SlashCommandBuilder().setName('tickets').setDescription('Publicar panel de tickets (solo admin)'),
   new SlashCommandBuilder()
@@ -47,7 +54,64 @@ const commands = [
     .setName('warns')
     .setDescription('Ver warns de un usuario (solo admin)')
     .addUserOption((option) => option.setName('usuario').setDescription('Usuario objetivo').setRequired(true)),
-].map((command) => command.toJSON());
+  new SlashCommandBuilder()
+    .setName('db')
+    .setDescription('Herramientas administrativas de base de datos (solo admin)')
+    .addSubcommand((sub) =>
+      sub
+        .setName('list')
+        .setDescription('Listar registros paginados de una entidad')
+        .addStringOption((option) =>
+          option.setName('entidad').setDescription('Entidad a consultar').setRequired(true).addChoices(...ENTITY_CHOICES)
+        )
+        .addIntegerOption((option) => option.setName('pagina').setDescription('Página a consultar').setMinValue(1))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('search')
+        .setDescription('Buscar registros de una entidad')
+        .addStringOption((option) =>
+          option.setName('entidad').setDescription('Entidad a consultar').setRequired(true).addChoices(...ENTITY_CHOICES)
+        )
+        .addStringOption((option) =>
+          option
+            .setName('texto')
+            .setDescription('Texto a buscar')
+            .setRequired(true)
+            .setMinLength(2)
+            .setMaxLength(100)
+        )
+        .addIntegerOption((option) => option.setName('pagina').setDescription('Página a consultar').setMinValue(1))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('delete')
+        .setDescription('Eliminar un registro de una entidad')
+        .addStringOption((option) =>
+          option.setName('entidad').setDescription('Entidad objetivo').setRequired(true).addChoices(...ENTITY_CHOICES)
+        )
+        .addStringOption((option) =>
+          option
+            .setName('identificador')
+            .setDescription('ID del registro o usuario a eliminar')
+            .setRequired(true)
+        )
+    ),
+];
+
+const commands = commandBuilders.map((command) => command.toJSON());
+
+function assertUniqueCommandNames(list) {
+  const seen = new Set();
+  for (const command of list) {
+    if (seen.has(command.name)) {
+      throw new Error(`Comando duplicado detectado: ${command.name}`);
+    }
+    seen.add(command.name);
+  }
+}
+
+assertUniqueCommandNames(commands);
 
 const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
