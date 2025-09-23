@@ -18,6 +18,10 @@ export const INTERACTION_IDS = {
   MIDDLEMAN_BUTTON_DATA: 'middleman:data',
   MIDDLEMAN_BUTTON_CONFIRM: 'middleman:confirm',
   MIDDLEMAN_BUTTON_HELP: 'middleman:help',
+  MIDDLEMAN_BUTTON_CLAIM: 'middleman:claim',
+  MIDDLEMAN_BUTTON_REQUEST_REVIEW: 'middleman:requestReview',
+  MIDDLEMAN_BUTTON_OPEN_REVIEW: 'middleman:openReview',
+  MIDDLEMAN_MODAL_REVIEW: 'middleman:reviewModal',
   TICKET_MENU: 'ticket:menu',
   WARN_MODAL_REASON: 'warn:modal',
 };

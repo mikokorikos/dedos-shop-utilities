@@ -245,3 +245,159 @@ export function buildDisabledPanel({ owner, partner, trades }) {
   return { ...base, components: [disabledRow] };
 }
 
+export function buildClaimPromptEmbed(mmRoleId) {
+  const roleMention = mmRoleId ? `<@&${mmRoleId}>` : 'Middleman';
+  const embed = applyDedosBrand(
+    new EmbedBuilder()
+      .setTitle('🛡️ Se requiere middleman')
+      .setDescription(
+        [
+          `${roleMention}, este ticket está listo para ser atendido.`,
+          'Pulsa el botón para reclamarlo y atender a los usuarios.',
+        ].join('\n')
+      )
+  );
+  return { embeds: [embed], files: [createDedosAttachment()], components: [claimRow()] };
+}
+
+export function claimRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(INTERACTION_IDS.MIDDLEMAN_BUTTON_CLAIM)
+      .setLabel('Reclamar Middleman')
+      .setStyle(ButtonStyle.Success)
+      .setEmoji('🛡️')
+  );
+}
+
+export function buildReviewPromptForMiddleman(mmTag) {
+  const embed = applyDedosBrand(
+    new EmbedBuilder()
+      .setTitle('📝 Solicitar reseñas')
+      .setDescription(
+        [
+          `${mmTag}, cuando finalices el trade usa el botón para solicitar reseñas a los traders.`,
+          'Esto enviará un mensaje para que califiquen tu servicio.',
+        ].join('\n')
+      )
+  );
+  return { embeds: [embed], files: [createDedosAttachment()], components: [requestReviewRow()] };
+}
+
+export function requestReviewRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(INTERACTION_IDS.MIDDLEMAN_BUTTON_REQUEST_REVIEW)
+      .setLabel('Solicitar reseñas')
+      .setEmoji('📝')
+      .setStyle(ButtonStyle.Secondary)
+  );
+}
+
+export function buildTicketClaimedMessage({ mmTag, robloxUsername, vouches, avgStars }) {
+  const stars = Number.isFinite(avgStars) ? avgStars : 0;
+  const embed = applyDedosBrand(
+    new EmbedBuilder()
+      .setTitle('🟦 TICKET RECLAMADO')
+      .setDescription(
+        [
+          `Te atiende **${mmTag}**`,
+          `**Roblox:** \`${robloxUsername}\``,
+          `**Vouches:** ${vouches}`,
+          `**⭐ Promedio:** ${stars > 0 ? stars.toFixed(2) : 'N/A'}`,
+        ].join('\n')
+      )
+  );
+  return { embeds: [embed], files: [createDedosAttachment()], components: [] };
+}
+
+export function buildRequestReviewsMessage({ mmTag, ownerMention, partnerMention }) {
+  const lines = [
+    '¡Trade finalizado! Por favor, deja tu reseña para calificar la experiencia con el middleman.',
+    'Haz clic en **Dejar reseña** y completa la información. Puedes dejar un comentario opcional.',
+  ];
+  const mentions = [ownerMention, partnerMention].filter(Boolean);
+  if (mentions.length) {
+    lines.unshift(mentions.join(' '));
+  }
+  const embed = applyDedosBrand(
+    new EmbedBuilder()
+      .setTitle('⭐ Comparte tu experiencia')
+      .setDescription(lines.join('\n'))
+      .setFooter({ text: 'Tu opinión ayuda a la comunidad a mantenerse segura.' })
+      .setAuthor({ name: `${mmTag} solicita tu reseña` })
+  );
+  return { embeds: [embed], files: [createDedosAttachment()], components: [buildReviewButtonRow()] };
+}
+
+export function buildReviewButtonRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(INTERACTION_IDS.MIDDLEMAN_BUTTON_OPEN_REVIEW)
+      .setLabel('Dejar reseña')
+      .setEmoji('⭐')
+      .setStyle(ButtonStyle.Primary)
+  );
+}
+
+export function buildReviewModal() {
+  return new ModalBuilder()
+    .setCustomId(INTERACTION_IDS.MIDDLEMAN_MODAL_REVIEW)
+    .setTitle('Reseña del middleman')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('stars')
+          .setLabel('Calificación (0-5)')
+          .setPlaceholder('Ingresa un número entero de 0 a 5')
+          .setMinLength(1)
+          .setMaxLength(2)
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('review_text')
+          .setLabel('Reseña (opcional)')
+          .setPlaceholder('Cuenta cómo fue tu experiencia con el middleman')
+          .setMaxLength(400)
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+      )
+    );
+}
+
+export function buildReviewPublishedEmbed({ reviewerTag, stars, text, mmTag }) {
+  const embed = applyDedosBrand(
+    new EmbedBuilder()
+      .setTitle(`⭐ Nueva reseña para ${mmTag}`)
+      .setDescription(text?.trim()?.length ? text.trim() : 'Sin comentarios adicionales.')
+      .addFields(
+        { name: 'Calificación', value: `${'⭐'.repeat(stars)}${'☆'.repeat(5 - stars)} (${stars}/5)`, inline: true },
+        { name: 'Usuario', value: reviewerTag, inline: true }
+      )
+  );
+  return { embeds: [embed], files: [createDedosAttachment()], components: [] };
+}
+
+export function buildTradeCompletedMessage({ middlemanTag, userOne, userTwo }) {
+  const embed = applyDedosBrand(
+    new EmbedBuilder()
+      .setTitle('TRADE COMPLETADO')
+      .setDescription(`**Middleman:** ${middlemanTag}`)
+      .addFields(
+        {
+          name: userOne?.label ?? 'Usuario 1',
+          value: `${userOne?.roblox ?? 'Roblox desconocido'}\n${userOne?.items ?? 'Sin registro'}`,
+          inline: true,
+        },
+        {
+          name: userTwo?.label ?? 'Usuario 2',
+          value: `${userTwo?.roblox ?? 'Roblox desconocido'}\n${userTwo?.items ?? 'Sin registro'}`,
+          inline: true,
+        }
+      )
+  );
+  return { embeds: [embed], files: [createDedosAttachment()], components: [] };
+}
+

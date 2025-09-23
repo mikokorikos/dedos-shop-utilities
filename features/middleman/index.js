@@ -1,11 +1,19 @@
 import { COMMAND_PREFIX } from '../../config/constants.js';
 import { guard } from '../../utils/guard.js';
-import { handleMiddlemanCommand, handleMiddlemanComponent, isMiddlemanComponent } from './logic.js';
+import {
+  canExecuteMmCommand,
+  handleMiddlemanCommand,
+  handleMiddlemanComponent,
+  handleMmCommand,
+  isMiddlemanComponent,
+} from './logic.js';
 
 export const middlemanFeature = {
   commands: [
     { type: 'slash', name: 'middleman', execute: guard(handleMiddlemanCommand) },
     { type: 'prefix', name: `${COMMAND_PREFIX}middleman`, execute: guard(handleMiddlemanCommand) },
+    { type: 'slash', name: 'mm', execute: guard(handleMmCommand, { hasPermission: canExecuteMmCommand }) },
+    { type: 'prefix', name: `${COMMAND_PREFIX}mm`, execute: guard(handleMmCommand, { hasPermission: canExecuteMmCommand }) },
   ],
   async onInteraction(interaction) {
     if (isMiddlemanComponent(interaction)) {

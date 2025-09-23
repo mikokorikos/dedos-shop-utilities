@@ -5,6 +5,35 @@ const commands = [
   new SlashCommandBuilder().setName('middleman').setDescription('Publicar panel de middleman (solo admin)'),
   new SlashCommandBuilder().setName('tickets').setDescription('Publicar panel de tickets (solo admin)'),
   new SlashCommandBuilder()
+    .setName('mm')
+    .setDescription('Administrar middlemans (solo admin)')
+    .addSubcommand((sub) =>
+      sub
+        .setName('add')
+        .setDescription('Registrar o actualizar a un middleman')
+        .addUserOption((option) => option.setName('usuario').setDescription('Usuario a registrar').setRequired(true))
+        .addStringOption((option) =>
+          option.setName('roblox_username').setDescription('Usuario de Roblox').setMinLength(3).setRequired(true)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('set')
+        .setDescription('Actualizar datos de un middleman')
+        .addUserOption((option) => option.setName('usuario').setDescription('Usuario a actualizar').setRequired(true))
+        .addStringOption((option) =>
+          option.setName('roblox_username').setDescription('Nuevo usuario de Roblox (opcional)').setMinLength(3).setRequired(false)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('stats')
+        .setDescription('Ver estadísticas de un middleman')
+        .addUserOption((option) => option.setName('usuario').setDescription('Usuario a consultar').setRequired(true))
+    )
+    .addSubcommand((sub) => sub.setName('list').setDescription('Listar top middlemans por vouches'))
+    .addSubcommand((sub) => sub.setName('closeforce').setDescription('Cerrar trade sin esperar reseñas (solo reclamante/admin)')),
+  new SlashCommandBuilder()
     .setName('warn')
     .setDescription('Aplicar warn a un usuario (solo admin)')
     .addUserOption((option) => option.setName('usuario').setDescription('Usuario a advertir').setRequired(true))

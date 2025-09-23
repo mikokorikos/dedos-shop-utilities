@@ -4,7 +4,7 @@ Bot modular para la comunidad **Dedos Shop** que centraliza middleman, warns, ti
 
 ## 🚀 Resumen rápido
 
-- **Middleman guiado** con paneles, validación de Roblox, confirmaciones independientes y bloqueo automático del canal.
+- **Middleman guiado** con paneles, validación de Roblox, confirmaciones independientes, reclamo por botón y cierre con reseñas.
 - **Warns escalables** con sanciones automáticas (timeouts/ban), notificaciones por DM y registro en MySQL.
 - **Tickets generales** con límites por usuario, cooldowns y avisos automáticos al staff.
 - **Branding obligatorio**: cada embed viaja con `dedosgif.gif`, color morado y textos corporativos.
@@ -55,6 +55,8 @@ index.js            # Bootstrap del bot
 | ---- | ------- | ----------- | -------- |
 | Slash | `/middleman` | Publica el panel de middleman | Solo admins |
 | Prefijo | `;middleman` | Idéntico a slash, vía prefijo | Solo admins |
+| Slash | `/mm` | Gestiona middlemans (`add`, `set`, `stats`, `list`, `closeforce`) | Admins (closeforce disponible para middleman reclamante) |
+| Prefijo | `;mm` | Versión prefijo del comando de gestión | Admins (closeforce disponible para middleman reclamante) |
 | Slash | `/tickets` | Publica panel de tickets generales | Solo admins |
 | Prefijo | `;tickets` | Versión prefijo del panel de tickets | Solo admins |
 | Slash | `/warn`, `/removewarn`, `/warns` | Gestiona warns | Solo admins |
@@ -77,7 +79,11 @@ Los usuarios que no tengan el rol configurado reciben un embed con el gif y el m
    - `📝 Mis datos de trade`: modal con usuario de Roblox + items. Valida la existencia en Roblox e informa con embed amarillo si la cuenta tiene < 1 año.
    - `✅ Confirmar trade`: marca la confirmación individual (solo si el usuario ya registró datos).
    - `🚨 Pedir ayuda`: desbloquea temporalmente el canal, menciona al staff y luego relockea automáticamente.
-6. Cuando ambos confirman, el canal se bloquea, los botones se desactivan y se notifica al rol `MM_ROLE_ID` con el embed **“🔒 Trade listo para middleman”**.
+6. Cuando ambos confirman, el canal se bloquea, los botones se desactivan y se notifica al rol `MM_ROLE_ID` con el embed **“🔒 Trade listo para middleman”**, además de publicar el botón **“Reclamar Middleman”**.
+7. Un middleman registrado puede reclamar el ticket (se verifica rol/DB), se genera una tarjeta visual con `node-canvas` y se registra la relación en `mm_claims`.
+8. El middleman obtiene un botón **“Solicitar reseñas”** para lanzar el flujo de calificación. El bot pingea a los traders con un embed y el botón **“Dejar reseña”** (modal con estrellas 0-5 + comentario opcional).
+9. Cada reseña se guarda en `mm_reviews`, se publica automáticamente en el canal configurado (`REVIEWS_CHANNEL_ID`) con la tarjeta del middleman y se recalcula el promedio de estrellas. Cuando todos los traders reseñan se suma un `vouch` y se envía el embed **“TRADE COMPLETADO”** con un resumen de lo entregado por cada parte.
+10. Si los traders confirmaron pero no dejan reseña, el middleman o un admin pueden ejecutar `/mm closeforce` para cerrar el trade igualmente (se publica el embed final y se deja log `[WARN]`).
 
 ### Errores y avisos esperados en middleman
 
@@ -115,7 +121,7 @@ Los usuarios que no tengan el rol configurado reciben un embed con el gif y el m
 
 ## 🗄️ Base de datos
 
-- El bot ejecuta migraciones en cada `ready`. Las tablas principales son `users`, `warns`, `tickets`, `ticket_participants`, `mm_trades`.
+- El bot ejecuta migraciones en cada `ready`. Las tablas principales son `users`, `warns`, `tickets`, `ticket_participants`, `mm_trades`, `middlemen`, `mm_reviews`, `mm_claims`.
 - Para creación manual o auditorías usa [`sql/schema.sql`](sql/schema.sql).
 - Conexión vía pool (`mysql2/promise`) con reintentos automáticos (`p-retry`).
 
