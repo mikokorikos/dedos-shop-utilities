@@ -53,6 +53,43 @@ const MIGRATIONS = [
     UNIQUE KEY uniq_mm_ticket_user (ticket_id, user_id),
     CONSTRAINT fk_mm_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
     CONSTRAINT fk_mm_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS middlemen (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    discord_user_id BIGINT NOT NULL UNIQUE,
+    roblox_username VARCHAR(255) NOT NULL,
+    roblox_user_id BIGINT NULL,
+    vouches_count INT NOT NULL DEFAULT 0,
+    rating_sum INT NOT NULL DEFAULT 0,
+    rating_count INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_middlemen_rating (rating_count, rating_sum)
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS mm_reviews (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ticket_id INT NOT NULL,
+    reviewer_user_id BIGINT NOT NULL,
+    middleman_user_id BIGINT NOT NULL,
+    stars TINYINT NOT NULL CHECK (stars BETWEEN 0 AND 5),
+    review_text TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_ticket_reviewer (ticket_id, reviewer_user_id),
+    INDEX idx_reviews_mm (middleman_user_id, created_at DESC),
+    CONSTRAINT fk_reviews_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+    CONSTRAINT fk_reviews_mm FOREIGN KEY (middleman_user_id) REFERENCES middlemen(discord_user_id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS mm_claims (
+    ticket_id INT PRIMARY KEY,
+    middleman_user_id BIGINT NOT NULL,
+    claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    review_requested_at TIMESTAMP NULL,
+    closed_at TIMESTAMP NULL,
+    vouched TINYINT(1) NOT NULL DEFAULT 0,
+    forced_close TINYINT(1) NOT NULL DEFAULT 0,
+    INDEX idx_claims_mm (middleman_user_id, claimed_at DESC),
+    CONSTRAINT fk_claim_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+    CONSTRAINT fk_claim_middleman FOREIGN KEY (middleman_user_id) REFERENCES middlemen(discord_user_id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
 ];
 

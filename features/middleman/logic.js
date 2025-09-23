@@ -4,14 +4,63 @@ import {
 } from 'discord.js';
 import { CONFIG } from '../../config/config.js';
 import { INTERACTION_IDS, TICKET_TYPES } from '../../config/constants.js';
-import { buildCooldownEmbed, buildDisabledPanel, buildHelpEmbed, buildMiddlemanInfo, buildMiddlemanPanel, buildPartnerModal, buildRobloxErrorEmbed, buildRobloxWarningEmbed, buildTicketCreatedEmbed, buildTicketLimitEmbed, buildTradeModal, buildTradePanel, buildTradeLockedEmbed, buildTradeUpdateEmbed } from './ui.js';
+import {
+  buildClaimPromptEmbed,
+  buildCooldownEmbed,
+  buildDisabledPanel,
+  buildHelpEmbed,
+  buildMiddlemanInfo,
+  buildMiddlemanPanel,
+  buildPartnerModal,
+  buildRequestReviewsMessage,
+  buildReviewModal,
+  buildReviewPublishedEmbed,
+  buildReviewPromptForMiddleman,
+  buildRobloxErrorEmbed,
+  buildRobloxWarningEmbed,
+  buildTicketClaimedMessage,
+  buildTicketCreatedEmbed,
+  buildTicketLimitEmbed,
+  buildTradeCompletedMessage,
+  buildTradeModal,
+  buildTradePanel,
+  buildTradeLockedEmbed,
+  buildTradeUpdateEmbed,
+  claimRow,
+  requestReviewRow,
+} from './ui.js';
 import { ensureUser } from '../../services/users.repo.js';
-import { countOpenTicketsByUser, createTicket, registerParticipant, getTicketByChannel, listParticipants } from '../../services/tickets.repo.js';
-import { getTrade, getTradesByTicket, resetTradeConfirmation, setTradeConfirmed, upsertTradeData } from '../../services/mm.repo.js';
+import {
+  countOpenTicketsByUser,
+  createTicket,
+  getTicketByChannel,
+  listParticipants,
+  registerParticipant,
+  setTicketStatus,
+} from '../../services/tickets.repo.js';
+import {
+  getTrade,
+  getTradesByTicket,
+  resetTradeConfirmation,
+  setTradeConfirmed,
+  upsertTradeData,
+} from '../../services/mm.repo.js';
+import { createClaim, getClaimByTicket, markClaimClosed, markClaimVouched, markReviewRequested } from '../../services/mmClaims.repo.js';
+import {
+  addMiddlemanRating,
+  getMiddlemanByDiscordId,
+  incrementMiddlemanVouch,
+  listTopMiddlemen,
+  updateMiddleman,
+  upsertMiddleman,
+} from '../../services/middlemen.repo.js';
+import { createReview, DuplicateReviewError, countReviewsForTicket, hasReviewFromUser } from '../../services/mmReviews.repo.js';
 import { checkCooldown } from '../../utils/cooldowns.js';
 import { parseUser } from '../../utils/helpers.js';
 import { assertRobloxUser } from '../../utils/roblox.js';
 import { logger } from '../../utils/logger.js';
+import { generateForRobloxUser } from '../../services/canvasCard.js';
+import { userIsAdmin } from '../../utils/permissions.js';
 
 const tradePanelMessages = new Map();
 
@@ -73,6 +122,26 @@ async function fetchParticipants(guild, ticket) {
   };
 }
 
+async function sendCommandReply(ctx, payload, { ephemeral = false } = {}) {
+  if ('reply' in ctx && typeof ctx.reply === 'function') {
+    return ctx.reply({ ...payload, ephemeral });
+  }
+  if ('followUp' in ctx && typeof ctx.followUp === 'function') {
+    return ctx.followUp({ ...payload, ephemeral });
+  }
+  if ('channel' in ctx && typeof ctx.channel?.send === 'function') {
+    return ctx.channel.send(payload);
+  }
+  throw new Error('No se pudo responder al comando middleman');
+}
+
+function computeAverageFromRecord(record) {
+  if (!record) return 0;
+  const sum = Number(record.rating_sum ?? 0);
+  const count = Number(record.rating_count ?? 0);
+  return count > 0 ? sum / count : 0;
+}
+
 const SNOWFLAKE_REGEX = /^\d{17,20}$/;
 
 function normalizeSnowflake(value) {
@@ -110,6 +179,94 @@ async function updateSendPermission(channel, userId, value) {
     logger.warn('No se pudo actualizar permisos para el usuario', userId, error);
     return false;
   }
+}
+
+function resolveMmSubcommand(ctx) {
+  if ('isChatInputCommand' in ctx && typeof ctx.isChatInputCommand === 'function' && ctx.isChatInputCommand()) {
+    try {
+      const sub = ctx.options.getSubcommand(false);
+      return sub?.toLowerCase?.() ?? null;
+    } catch (error) {
+      logger.debug('No se pudo resolver subcomando slash /mm', error);
+      return null;
+    }
+  }
+  const content = ctx.content ?? '';
+  const [, ...parts] = content.trim().split(/\s+/);
+  return parts[0]?.toLowerCase?.() ?? null;
+}
+
+function resolvePrefixArgs(message) {
+  const parts = message.content.trim().split(/\s+/);
+  const [, subcommandRaw, ...rest] = parts;
+  const subcommand = subcommandRaw?.toLowerCase?.() ?? null;
+  let userId = null;
+  let username = null;
+  if (['add', 'set', 'stats'].includes(subcommand)) {
+    const mention = message.mentions?.users?.first();
+    if (mention) {
+      userId = mention.id;
+      const idx = rest.findIndex((token) => token.includes(mention.id));
+      if (idx >= 0) {
+        rest.splice(idx, 1);
+      }
+    } else if (rest.length > 0) {
+      const parsed = parseUser(rest[0]);
+      if (parsed) {
+        userId = parsed;
+        rest.shift();
+      }
+    }
+    if (rest.length > 0) {
+      username = rest.join(' ');
+    }
+  }
+  return { subcommand, userId, username };
+}
+
+function resolveSlashArgs(interaction) {
+  const subcommand = resolveMmSubcommand(interaction);
+  let userId = null;
+  let username = null;
+  if (['add', 'set', 'stats'].includes(subcommand)) {
+    const userOption =
+      interaction.options.getUser('user') ??
+      interaction.options.getUser('objective') ??
+      interaction.options.getUser('target');
+    userId = userOption?.id ?? null;
+    username =
+      interaction.options.getString('roblox_username') ??
+      interaction.options.getString('roblox') ??
+      interaction.options.getString('username') ??
+      null;
+  }
+  return { subcommand, userId, username };
+}
+
+export async function canExecuteMmCommand(member, ctx) {
+  if (userIsAdmin(member, CONFIG.ADMIN_ROLE_ID)) {
+    return true;
+  }
+  const subcommand = resolveMmSubcommand(ctx);
+  if (subcommand !== 'closeforce') {
+    return false;
+  }
+  if (!member) {
+    return false;
+  }
+  const channelId = ctx.channelId ?? ctx.channel?.id ?? null;
+  if (!channelId) {
+    return false;
+  }
+  const ticket = await getTicketByChannel(channelId);
+  if (!ticket) {
+    return false;
+  }
+  const claim = await getClaimByTicket(ticket.id);
+  if (!claim) {
+    return false;
+  }
+  return String(claim.middleman_user_id) === String(member.id);
 }
 
 async function ensurePanelMessage(channel, { owner, partner, disabled } = {}) {
@@ -152,6 +309,198 @@ export async function handleMiddlemanCommand(ctx) {
     await ctx.reply?.({ ...panel, allowedMentions: { parse: [] } }) ?? ctx.channel.send({ ...panel, allowedMentions: { parse: [] } });
   }
   logger.flow('Panel middleman publicado por', ctx.user?.id ?? ctx.author?.id);
+}
+
+function buildMmUsageEmbed() {
+  return buildTradeUpdateEmbed(
+    '📘 Comandos middleman',
+    [
+      '`/mm add @usuario roblox_username`',
+      '`/mm set @usuario roblox_username?`',
+      '`/mm stats @usuario`',
+      '`/mm list`',
+      '`/mm closeforce` (solo middleman reclamante o admin)',
+    ].join('\n')
+  );
+}
+
+export async function handleMmCommand(ctx) {
+  const isSlash = 'isChatInputCommand' in ctx && typeof ctx.isChatInputCommand === 'function' && ctx.isChatInputCommand();
+  const args = isSlash ? resolveSlashArgs(ctx) : resolvePrefixArgs(ctx);
+  const subcommand = args.subcommand ?? null;
+  switch (subcommand) {
+    case 'add':
+      await handleMmAdd(ctx, args, { isSlash });
+      break;
+    case 'set':
+      await handleMmSet(ctx, args, { isSlash });
+      break;
+    case 'stats':
+      await handleMmStats(ctx, args, { isSlash });
+      break;
+    case 'list':
+      await handleMmList(ctx, { isSlash });
+      break;
+    case 'closeforce':
+      await handleMmCloseForce(ctx, { isSlash });
+      break;
+    default: {
+      const usage = buildMmUsageEmbed();
+      await sendCommandReply(ctx, usage, { ephemeral: isSlash });
+      break;
+    }
+  }
+}
+
+async function resolveUserTag(client, userId) {
+  if (!userId) return 'Usuario desconocido';
+  try {
+    const user = await client.users.fetch(String(userId));
+    return `${user}`;
+  } catch (error) {
+    return `<@${userId}>`;
+  }
+}
+
+async function handleMmAdd(ctx, args, { isSlash }) {
+  const { userId, username } = args;
+  if (!userId || !username) {
+    const usage = buildTradeUpdateEmbed('⚠️ Faltan argumentos', 'Debes indicar un usuario y un username de Roblox.');
+    await sendCommandReply(ctx, usage, { ephemeral: isSlash });
+    return;
+  }
+  const lookup = await assertRobloxUser(username);
+  if (!lookup.exists) {
+    await sendCommandReply(ctx, { ...buildRobloxErrorEmbed(username) }, { ephemeral: isSlash });
+    return;
+  }
+  await ensureUser(userId);
+  await upsertMiddleman({
+    discordUserId: userId,
+    robloxUsername: lookup.user.name,
+    robloxUserId: lookup.user.id,
+  });
+  const tag = await resolveUserTag(ctx.client, userId);
+  const embed = buildTradeUpdateEmbed(
+    '✅ Middleman registrado',
+    [`Se registró ${tag} como middleman.`, `Roblox: **${lookup.user.name}** (${lookup.user.id})`].join('\n')
+  );
+  await sendCommandReply(ctx, embed, { ephemeral: isSlash });
+  logger.flow('Middleman agregado/actualizado', userId, 'por', ctx.user?.id ?? ctx.author?.id);
+}
+
+async function handleMmSet(ctx, args, { isSlash }) {
+  const { userId, username } = args;
+  if (!userId) {
+    const usage = buildTradeUpdateEmbed('⚠️ Faltan argumentos', 'Debes indicar a qué usuario deseas actualizar.');
+    await sendCommandReply(ctx, usage, { ephemeral: isSlash });
+    return;
+  }
+  const mm = await getMiddlemanByDiscordId(userId);
+  if (!mm) {
+    const embed = buildTradeUpdateEmbed('❌ Middleman no registrado', 'Registra al usuario primero con `/mm add`.');
+    await sendCommandReply(ctx, embed, { ephemeral: isSlash });
+    return;
+  }
+  let newRoblox = null;
+  if (username) {
+    const lookup = await assertRobloxUser(username);
+    if (!lookup.exists) {
+      await sendCommandReply(ctx, { ...buildRobloxErrorEmbed(username) }, { ephemeral: isSlash });
+      return;
+    }
+    newRoblox = lookup;
+    await updateMiddleman({
+      discordUserId: userId,
+      robloxUsername: lookup.user.name,
+      robloxUserId: lookup.user.id,
+    });
+  } else {
+    await updateMiddleman({ discordUserId: userId });
+  }
+  const tag = await resolveUserTag(ctx.client, userId);
+  const embed = buildTradeUpdateEmbed(
+    '🔁 Middleman actualizado',
+    newRoblox
+      ? [`Se actualizó la información de ${tag}.`, `Roblox ahora es **${newRoblox.user.name}** (${newRoblox.user.id}).`].join('\n')
+      : `Se refrescaron los datos de ${tag}.`
+  );
+  await sendCommandReply(ctx, embed, { ephemeral: isSlash });
+  logger.flow('Middleman actualizado', userId, 'por', ctx.user?.id ?? ctx.author?.id);
+}
+
+async function handleMmStats(ctx, args, { isSlash }) {
+  const { userId } = args;
+  if (!userId) {
+    const usage = buildTradeUpdateEmbed('⚠️ Faltan argumentos', 'Indica qué middleman quieres consultar.');
+    await sendCommandReply(ctx, usage, { ephemeral: isSlash });
+    return;
+  }
+  const mm = await getMiddlemanByDiscordId(userId);
+  if (!mm) {
+    const embed = buildTradeUpdateEmbed('❌ Middleman no registrado', 'No se encontraron datos para este usuario.');
+    await sendCommandReply(ctx, embed, { ephemeral: isSlash });
+    return;
+  }
+  const avg = computeAverageFromRecord(mm);
+  const tag = await resolveUserTag(ctx.client, userId);
+  const embed = buildTradeUpdateEmbed(
+    '📊 Estadísticas de middleman',
+    [
+      `Usuario: ${tag}`,
+      `Roblox: **${mm.roblox_username}**${mm.roblox_user_id ? ` (${mm.roblox_user_id})` : ''}`,
+      `Vouches: **${mm.vouches_count}**`,
+      `Promedio de estrellas: **${mm.rating_count ? avg.toFixed(2) : 'N/A'}** (${mm.rating_count} reseña${mm.rating_count === 1 ? '' : 's'})`,
+    ].join('\n')
+  );
+  await sendCommandReply(ctx, embed, { ephemeral: isSlash });
+}
+
+async function handleMmList(ctx, { isSlash }) {
+  const rows = await listTopMiddlemen(10);
+  if (!rows.length) {
+    const embed = buildTradeUpdateEmbed('ℹ️ Sin middlemans', 'Aún no se registran middlemans en la base de datos.');
+    await sendCommandReply(ctx, embed, { ephemeral: isSlash });
+    return;
+  }
+  const description = await Promise.all(
+    rows.map(async (row, index) => {
+      const avg = computeAverageFromRecord(row);
+      const tag = await resolveUserTag(ctx.client, row.discord_user_id);
+      const ratingLabel = row.rating_count ? `${avg.toFixed(2)} ⭐ (${row.rating_count})` : 'Sin reseñas';
+      return `${index + 1}. ${tag} — **${row.vouches_count}** vouches — ${ratingLabel}`;
+    })
+  );
+  const embed = buildTradeUpdateEmbed('🏆 Top middlemans', description.join('\n'));
+  await sendCommandReply(ctx, embed, { ephemeral: isSlash });
+}
+
+async function handleMmCloseForce(ctx, { isSlash }) {
+  const channel = ctx.channel ?? (ctx.client?.channels ? await ctx.client.channels.fetch(ctx.channelId) : null);
+  if (!channel || !channel.isTextBased?.()) {
+    const embed = buildTradeUpdateEmbed('❌ Canal inválido', 'Este comando solo funciona dentro de un canal de ticket.');
+    await sendCommandReply(ctx, embed, { ephemeral: isSlash });
+    return;
+  }
+  const ticket = await getTicketByChannel(channel.id);
+  if (!ticket) {
+    const embed = buildTradeUpdateEmbed('❌ Ticket no encontrado', 'No se halló un ticket asociado a este canal.');
+    await sendCommandReply(ctx, embed, { ephemeral: isSlash });
+    return;
+  }
+  const result = await finalizeTrade({
+    channel,
+    ticket,
+    forced: true,
+    executorId: ctx.user?.id ?? ctx.author?.id ?? null,
+  });
+  if (!result.ok) {
+    const embed = buildTradeUpdateEmbed('⚠️ No se pudo cerrar', result.reason ?? 'Intenta nuevamente.');
+    await sendCommandReply(ctx, embed, { ephemeral: isSlash });
+    return;
+  }
+  const embed = buildTradeUpdateEmbed('⚠️ Cierre forzado ejecutado', 'Se cerró el trade y se publicó el resumen final.');
+  await sendCommandReply(ctx, embed, { ephemeral: isSlash });
 }
 
 export async function handleMiddlemanMenu(interaction) {
@@ -352,6 +701,16 @@ export async function handleTradeConfirm(interaction) {
       allowedMentions: { roles: CONFIG.MM_ROLE_ID ? [CONFIG.MM_ROLE_ID] : [] },
       ephemeral: false,
     });
+    await interaction.channel.send({
+      ...buildClaimPromptEmbed(CONFIG.MM_ROLE_ID),
+      allowedMentions: { roles: CONFIG.MM_ROLE_ID ? [CONFIG.MM_ROLE_ID] : [] },
+    });
+    const claim = await getClaimByTicket(ticket.id);
+    if (claim && !claim.vouched) {
+      await incrementMiddlemanVouch(claim.middleman_user_id);
+      await markClaimVouched(ticket.id);
+      logger.flow('Vouch sumado por confirmaciones completas', claim.middleman_user_id, 'ticket', ticket.id);
+    }
   }
 }
 
@@ -386,6 +745,292 @@ export async function handleTradeHelp(interaction) {
   }, CONFIG.MIDDLEMAN.HELP_UNLOCK_MS).unref?.();
 }
 
+async function finalizeTrade({ channel, ticket, forced = false, executorId = null }) {
+  const claim = await getClaimByTicket(ticket.id);
+  if (!claim) {
+    return { ok: false, reason: 'No hay middleman reclamado para este ticket.' };
+  }
+  if (claim.closed_at) {
+    return { ok: false, reason: 'Este trade ya fue cerrado previamente.' };
+  }
+  const participants = await fetchParticipants(channel.guild, ticket);
+  const trades = await getTradesByTicket(ticket.id);
+  const ownerTrade = trades.find((t) => String(t.user_id) === String(participants.owner.id));
+  const partnerTrade = trades.find((t) => String(t.user_id) === String(participants.partner.id));
+  const middlemanTag = `<@${claim.middleman_user_id}>`;
+  const payload = buildTradeCompletedMessage({
+    middlemanTag,
+    userOne: {
+      label: participants.owner?.toString?.() ?? participants.owner?.displayName ?? participants.owner?.user?.username ?? 'Usuario 1',
+      roblox: ownerTrade?.roblox_username ?? 'Sin registro',
+      items: ownerTrade?.items ?? 'Sin información',
+    },
+    userTwo: {
+      label: participants.partner?.toString?.() ?? participants.partner?.displayName ?? participants.partner?.user?.username ?? 'Usuario 2',
+      roblox: partnerTrade?.roblox_username ?? 'Sin registro',
+      items: partnerTrade?.items ?? 'Sin información',
+    },
+  });
+  if (forced) {
+    payload.embeds[0].addFields({ name: 'Estado del cierre', value: 'Forzado por el staff/middleman', inline: false });
+  }
+  const allowedMentions = {
+    users: [claim.middleman_user_id, participants.owner?.id, participants.partner?.id]
+      .filter(Boolean)
+      .map((id) => String(id)),
+  };
+  await channel.send({ ...payload, allowedMentions });
+
+  const logsChannelId = CONFIG.TRADE_LOGS_CHANNEL_ID;
+  if (logsChannelId) {
+    try {
+      const logsChannel = await channel.client.channels.fetch(logsChannelId);
+      if (logsChannel?.isTextBased?.()) {
+        const logPayload = buildTradeCompletedMessage({
+          middlemanTag,
+          userOne: {
+            label: participants.owner?.toString?.() ?? participants.owner?.displayName ?? participants.owner?.user?.username ?? 'Usuario 1',
+            roblox: ownerTrade?.roblox_username ?? 'Sin registro',
+            items: ownerTrade?.items ?? 'Sin información',
+          },
+          userTwo: {
+            label: participants.partner?.toString?.() ?? participants.partner?.displayName ?? participants.partner?.user?.username ?? 'Usuario 2',
+            roblox: partnerTrade?.roblox_username ?? 'Sin registro',
+            items: partnerTrade?.items ?? 'Sin información',
+          },
+        });
+        if (forced) {
+          logPayload.embeds[0].addFields({ name: 'Estado del cierre', value: 'Forzado por el staff/middleman', inline: false });
+        }
+        await logsChannel.send({ ...logPayload, allowedMentions: { parse: [] } });
+      }
+    } catch (error) {
+      logger.warn('No se pudo enviar log de trade completado', error);
+    }
+  }
+
+  await markClaimClosed(ticket.id, { forced });
+  await setTicketStatus(ticket.id, 'closed');
+  if (forced) {
+    logger.warn('Trade cerrado forzosamente', ticket.id, 'por', executorId ?? 'desconocido');
+  } else {
+    logger.flow('Trade completado y cerrado', ticket.id, 'por', executorId ?? 'automático');
+  }
+  return { ok: true };
+}
+
+async function handleClaimButton(interaction) {
+  const member = interaction.member;
+  const isAdmin = userIsAdmin(member, CONFIG.ADMIN_ROLE_ID);
+  const isMiddleman = member?.roles?.cache?.has(CONFIG.MM_ROLE_ID);
+  if (!isAdmin && !isMiddleman) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('⛔ Permisos insuficientes', 'Solo middlemans o admins pueden reclamar este ticket.'), ephemeral: true });
+    return;
+  }
+  const ticket = await getTicketByChannel(interaction.channel.id);
+  if (!ticket) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Ticket inválido', 'No se encontró información para este canal.'), ephemeral: true });
+    return;
+  }
+  const existing = await getClaimByTicket(ticket.id);
+  if (existing && String(existing.middleman_user_id) !== String(interaction.user.id)) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('⏳ Ya reclamado', 'Otro middleman ya está atendiendo este ticket.'), ephemeral: true });
+    return;
+  }
+  const middleman = await getMiddlemanByDiscordId(interaction.user.id);
+  if (!middleman) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('❌ No registrado', 'No estás en la base de datos de middlemans. Solicita a un admin que te registre.'), ephemeral: true });
+    return;
+  }
+  await createClaim({ ticketId: ticket.id, middlemanUserId: interaction.user.id });
+  const card = await generateForRobloxUser({
+    robloxUsername: middleman.roblox_username,
+    robloxUserId: middleman.roblox_user_id,
+    rating: computeAverageFromRecord(middleman),
+    ratingCount: middleman.rating_count,
+    vouches: middleman.vouches_count,
+  }).catch((error) => {
+    logger.warn('No se pudo generar tarjeta de middleman', error);
+    return null;
+  });
+  const payload = buildTicketClaimedMessage({
+    mmTag: interaction.user.toString(),
+    robloxUsername: middleman.roblox_username,
+    vouches: middleman.vouches_count,
+    avgStars: computeAverageFromRecord(middleman),
+  });
+  const files = [...payload.files];
+  if (card) {
+    files.push(card);
+  }
+  await interaction.reply({ ...payload, files, allowedMentions: { users: [interaction.user.id] } });
+  try {
+    const disabledRow = claimRow();
+    disabledRow.components[0].setDisabled(true);
+    await interaction.message.edit({ components: [disabledRow] });
+  } catch (error) {
+    logger.warn('No se pudo deshabilitar botón de reclamo', error);
+  }
+  const reviewPrompt = buildReviewPromptForMiddleman(interaction.user.toString());
+  await interaction.channel.send({ ...reviewPrompt, allowedMentions: { users: [interaction.user.id] } });
+  logger.flow('MM', interaction.user.tag, 'reclamó ticket', interaction.channel.id);
+}
+
+async function handleRequestReviewsButton(interaction) {
+  const member = interaction.member;
+  const isAdmin = userIsAdmin(member, CONFIG.ADMIN_ROLE_ID);
+  const ticket = await getTicketByChannel(interaction.channel.id);
+  if (!ticket) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Ticket inválido', 'No se encontró información para este canal.'), ephemeral: true });
+    return;
+  }
+  const claim = await getClaimByTicket(ticket.id);
+  if (!claim) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Sin middleman', 'Debes reclamar el ticket antes de solicitar reseñas.'), ephemeral: true });
+    return;
+  }
+  const isOwner = String(claim.middleman_user_id) === String(interaction.user.id);
+  if (!isOwner && !isAdmin) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('⛔ Permisos insuficientes', 'Solo el middleman asignado puede solicitar reseñas.'), ephemeral: true });
+    return;
+  }
+  if (claim.review_requested_at) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('ℹ️ Ya enviado', 'Las reseñas ya fueron solicitadas en este ticket.'), ephemeral: true });
+    return;
+  }
+  await markReviewRequested(ticket.id);
+  const participants = await fetchParticipants(interaction.guild, ticket);
+  const prompt = buildRequestReviewsMessage({
+    mmTag: interaction.user.toString(),
+    ownerMention: participants.owner?.toString?.() ?? null,
+    partnerMention: participants.partner?.toString?.() ?? null,
+  });
+  const mentionTargets = [participants.owner?.id, participants.partner?.id]
+    .filter(Boolean)
+    .map((id) => String(id));
+  await interaction.channel.send({ ...prompt, allowedMentions: { users: mentionTargets } });
+  try {
+    const disabledRow = requestReviewRow();
+    disabledRow.components[0].setDisabled(true);
+    await interaction.message.edit({ components: [disabledRow] });
+  } catch (error) {
+    logger.warn('No se pudo deshabilitar botón de reseñas', error);
+  }
+  await interaction.reply({ ...buildTradeUpdateEmbed('✅ Solicitud enviada', 'Se invitó a los usuarios a dejar su reseña.'), ephemeral: true });
+  logger.flow('Solicitadas reseñas para ticket', ticket.id, 'por', interaction.user.tag);
+}
+
+async function handleOpenReviewButton(interaction) {
+  const ticket = await getTicketByChannel(interaction.channel.id);
+  if (!ticket) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Ticket inválido', 'No se encontró información para este canal.'), ephemeral: true });
+    return;
+  }
+  const participants = await listParticipants(ticket.id);
+  if (!participants.includes(String(interaction.user.id))) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('⛔ No participas en el trade', 'Solo los traders pueden dejar reseña.'), ephemeral: true });
+    return;
+  }
+  const already = await hasReviewFromUser(ticket.id, interaction.user.id);
+  if (already) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('ℹ️ Ya registraste reseña', 'Solo puedes enviar una reseña por trade.'), ephemeral: true });
+    return;
+  }
+  const modal = buildReviewModal();
+  await interaction.showModal(modal);
+}
+
+async function handleReviewModalSubmit(interaction) {
+  const ticket = await getTicketByChannel(interaction.channel.id);
+  if (!ticket) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Ticket inválido', 'No se encontró información para este canal.'), ephemeral: true });
+    return;
+  }
+  const claim = await getClaimByTicket(ticket.id);
+  if (!claim) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Sin middleman', 'No se registró un middleman para este ticket.'), ephemeral: true });
+    return;
+  }
+  const participants = await listParticipants(ticket.id);
+  if (!participants.includes(String(interaction.user.id))) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('⛔ No participas en el trade', 'Solo los traders pueden dejar reseña.'), ephemeral: true });
+    return;
+  }
+  const starsRaw = interaction.fields.getTextInputValue('stars');
+  const stars = Number.parseInt(starsRaw, 10);
+  if (!Number.isInteger(stars) || stars < 0 || stars > 5) {
+    await interaction.reply({ ...buildTradeUpdateEmbed('⚠️ Calificación inválida', 'Debes ingresar un número entero entre 0 y 5.'), ephemeral: true });
+    return;
+  }
+  const text = interaction.fields.getTextInputValue('review_text')?.slice(0, 400) ?? null;
+  try {
+    await createReview({
+      ticketId: ticket.id,
+      reviewerUserId: interaction.user.id,
+      middlemanUserId: claim.middleman_user_id,
+      stars,
+      reviewText: text,
+    });
+  } catch (error) {
+    if (error instanceof DuplicateReviewError) {
+      await interaction.reply({ ...buildTradeUpdateEmbed('ℹ️ Ya registraste reseña', 'Solo puedes enviar una reseña por trade.'), ephemeral: true });
+      return;
+    }
+    logger.error('No se pudo registrar reseña', error);
+    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Error', 'No se pudo guardar tu reseña. Intenta nuevamente más tarde.'), ephemeral: true });
+    return;
+  }
+
+  await addMiddlemanRating(claim.middleman_user_id, stars);
+  const middleman = await getMiddlemanByDiscordId(claim.middleman_user_id);
+  const card = await generateForRobloxUser({
+    robloxUsername: middleman?.roblox_username,
+    robloxUserId: middleman?.roblox_user_id,
+    rating: computeAverageFromRecord(middleman),
+    ratingCount: middleman?.rating_count,
+    vouches: middleman?.vouches_count,
+  }).catch((error) => {
+    logger.warn('No se pudo generar tarjeta para reseña', error);
+    return null;
+  });
+  if (CONFIG.REVIEWS_CHANNEL_ID) {
+    try {
+      const reviewsChannel = await interaction.client.channels.fetch(CONFIG.REVIEWS_CHANNEL_ID);
+      if (reviewsChannel?.isTextBased?.()) {
+        const reviewEmbed = buildReviewPublishedEmbed({
+          reviewerTag: interaction.user.toString(),
+          stars,
+          text,
+          mmTag: `<@${claim.middleman_user_id}>`,
+        });
+        const files = [...reviewEmbed.files];
+        if (card) files.push(card);
+        await reviewsChannel.send({ ...reviewEmbed, files, allowedMentions: { users: [interaction.user.id, claim.middleman_user_id] } });
+      }
+    } catch (error) {
+      logger.warn('No se pudo publicar reseña en canal dedicado', error);
+    }
+  }
+
+  await interaction.reply({ ...buildTradeUpdateEmbed('✅ ¡Gracias por tu reseña!', 'Se registró tu opinión correctamente.'), ephemeral: true });
+  logger.flow('Reseña registrada', interaction.user.tag, 'ticket', ticket.id, 'stars', stars);
+
+  const reviewsCount = await countReviewsForTicket(ticket.id);
+  const uniqueParticipants = new Set(participants);
+  if (reviewsCount >= uniqueParticipants.size) {
+    const claimAfter = await getClaimByTicket(ticket.id);
+    if (claimAfter && !claimAfter.vouched) {
+      await incrementMiddlemanVouch(claimAfter.middleman_user_id);
+      await markClaimVouched(ticket.id);
+      logger.flow('Vouch sumado por reseñas completas', claimAfter.middleman_user_id, 'ticket', ticket.id);
+    }
+    const channel = interaction.channel ?? (await interaction.client.channels.fetch(ticket.channel_id).catch(() => null));
+    if (channel?.isTextBased?.()) {
+      await finalizeTrade({ channel, ticket, forced: false, executorId: interaction.user.id });
+    }
+  }
+}
+
 export function isMiddlemanComponent(interaction) {
   return [
     INTERACTION_IDS.MIDDLEMAN_MENU,
@@ -394,6 +1039,10 @@ export function isMiddlemanComponent(interaction) {
     INTERACTION_IDS.MIDDLEMAN_BUTTON_DATA,
     INTERACTION_IDS.MIDDLEMAN_BUTTON_CONFIRM,
     INTERACTION_IDS.MIDDLEMAN_BUTTON_HELP,
+    INTERACTION_IDS.MIDDLEMAN_BUTTON_CLAIM,
+    INTERACTION_IDS.MIDDLEMAN_BUTTON_REQUEST_REVIEW,
+    INTERACTION_IDS.MIDDLEMAN_BUTTON_OPEN_REVIEW,
+    INTERACTION_IDS.MIDDLEMAN_MODAL_REVIEW,
   ].includes(interaction.customId);
 }
 
@@ -418,6 +1067,18 @@ export async function handleMiddlemanComponent(interaction) {
       break;
     case INTERACTION_IDS.MIDDLEMAN_BUTTON_HELP:
       await handleTradeHelp(interaction);
+      break;
+    case INTERACTION_IDS.MIDDLEMAN_BUTTON_CLAIM:
+      await handleClaimButton(interaction);
+      break;
+    case INTERACTION_IDS.MIDDLEMAN_BUTTON_REQUEST_REVIEW:
+      await handleRequestReviewsButton(interaction);
+      break;
+    case INTERACTION_IDS.MIDDLEMAN_BUTTON_OPEN_REVIEW:
+      await handleOpenReviewButton(interaction);
+      break;
+    case INTERACTION_IDS.MIDDLEMAN_MODAL_REVIEW:
+      await handleReviewModalSubmit(interaction);
       break;
     default:
       break;

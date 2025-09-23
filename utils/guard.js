@@ -64,11 +64,13 @@ async function sendError(ctx, error) {
 export function guard(handler, options = {}) {
   const adminRoleId = options.adminRoleId ?? CONFIG.ADMIN_ROLE_ID;
   const cooldownMs = options.cooldownMs ?? 2_000;
+  const hasPermissionFn = options.hasPermission ?? ((member) => userIsAdmin(member, adminRoleId));
   return async (ctx, ...rest) => {
     try {
       const userId = ctx.user?.id ?? ctx.author?.id;
       const member = await resolveMember(ctx, userId);
-      if (!userIsAdmin(member, adminRoleId)) {
+      const allowed = await hasPermissionFn(member, ctx);
+      if (!allowed) {
         throw new PermissionError();
       }
       if (cooldownMs > 0) {
