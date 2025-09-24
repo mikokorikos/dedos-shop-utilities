@@ -1,5 +1,6 @@
 import {
   ChannelType,
+  OverwriteType,
   PermissionFlagsBits,
 } from 'discord.js';
 import { CONFIG } from '../../config/config.js';
@@ -169,14 +170,37 @@ function resolveParticipantIds(ticket, participants) {
 }
 
 async function updateSendPermission(channel, userId, value) {
-  if (!userId) {
+  const targetId = normalizeSnowflake(userId);
+  if (!targetId) {
     return false;
   }
+
+  const member =
+    channel.guild.members.cache.get(targetId) ??
+    (await channel.guild.members.fetch(targetId).catch(() => null));
+
+  const user = member
+    ? member
+    : channel.client.users.cache.get(targetId) ??
+      (await channel.client.users.fetch(targetId).catch(() => null));
+
+  if (!user) {
+    logger.warn('No se pudo resolver usuario para actualizar permisos', targetId);
+    return false;
+  }
+
+  const overwriteOptions =
+    typeof OverwriteType?.Member === 'number' ? { type: OverwriteType.Member } : undefined;
+
   try {
-    await channel.permissionOverwrites.edit(userId, { SendMessages: value });
+    if (overwriteOptions) {
+      await channel.permissionOverwrites.edit(user, { SendMessages: value }, overwriteOptions);
+    } else {
+      await channel.permissionOverwrites.edit(user, { SendMessages: value });
+    }
     return true;
   } catch (error) {
-    logger.warn('No se pudo actualizar permisos para el usuario', userId, error);
+    logger.warn('No se pudo actualizar permisos para el usuario', targetId, error);
     return false;
   }
 }
