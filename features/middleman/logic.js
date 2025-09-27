@@ -927,20 +927,29 @@ async function handleRequestReviewsButton(interaction) {
   const isAdmin = userIsAdmin(member, CONFIG.ADMIN_ROLE_ID);
   const ticket = await getTicketByChannel(interaction.channel.id);
   if (!ticket) {
+    logger.warn('Solicitud de reseñas sin ticket asociado', interaction.channel.id, interaction.user.id);
     await interaction.reply({ ...buildTradeUpdateEmbed('❌ Ticket inválido', 'No se encontró información para este canal.'), ephemeral: true });
     return;
   }
   const claim = await getClaimByTicket(ticket.id);
   if (!claim) {
+    logger.warn('Solicitud de reseñas sin middleman', { ticketId: ticket.id, channelId: interaction.channel.id, requestedBy: interaction.user.id });
     await interaction.reply({ ...buildTradeUpdateEmbed('❌ Sin middleman', 'Debes reclamar el ticket antes de solicitar reseñas.'), ephemeral: true });
     return;
   }
   const isOwner = String(claim.middleman_user_id) === String(interaction.user.id);
   if (!isOwner && !isAdmin) {
+    logger.warn('Intento inválido de solicitar reseñas', {
+      ticketId: ticket.id,
+      channelId: interaction.channel.id,
+      claimOwner: claim.middleman_user_id,
+      requestedBy: interaction.user.id,
+    });
     await interaction.reply({ ...buildTradeUpdateEmbed('⛔ Permisos insuficientes', 'Solo el middleman asignado puede solicitar reseñas.'), ephemeral: true });
     return;
   }
   if (claim.review_requested_at) {
+    logger.info('Solicitud de reseñas repetida ignorada', { ticketId: ticket.id, requestedBy: interaction.user.id });
     await interaction.reply({ ...buildTradeUpdateEmbed('ℹ️ Ya enviado', 'Las reseñas ya fueron solicitadas en este ticket.'), ephemeral: true });
     return;
   }
@@ -954,6 +963,12 @@ async function handleRequestReviewsButton(interaction) {
   const mentionTargets = [participants.owner?.id, participants.partner?.id]
     .filter(Boolean)
     .map((id) => String(id));
+  logger.debug('Preparando solicitud de reseñas', {
+    ticketId: ticket.id,
+    requestedBy: interaction.user.id,
+    claimOwner: claim.middleman_user_id,
+    mentionTargets,
+  });
   await interaction.channel.send({ ...prompt, allowedMentions: { users: mentionTargets } });
   try {
     const disabledRow = requestReviewRow();

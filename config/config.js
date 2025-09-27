@@ -36,6 +36,7 @@ export const CONFIG = {
   REVIEWS_CHANNEL_ID: process.env.REVIEWS_CHANNEL_ID ?? null,
   TRADE_LOGS_CHANNEL_ID: process.env.TRADE_LOGS_CHANNEL_ID ?? null,
   LOG_LEVEL: process.env.LOG_LEVEL ?? 'info',
+  LOG_FILE_PATH: process.env.LOG_FILE_PATH ?? 'dedosbot.log',
   DEDOS_GIF_PATH: deduceGifPath(),
   MYSQL: {
     HOST: process.env.MYSQL_HOST ?? 'localhost',
