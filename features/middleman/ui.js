@@ -99,30 +99,60 @@ export function buildTradeModal() {
     );
 }
 
-export function buildTradePanel({ owner, partner, trades }) {
-  const ownerTrade = trades.find((t) => String(t.user_id) === String(owner.id));
-  const partnerTrade = trades.find((t) => String(t.user_id) === String(partner.id));
+export function buildTradePanel({ owner, partner, trades, state }) {
+  const ownerTrade = state?.owner?.trade ?? trades.find((t) => String(t.user_id) === String(owner.id));
+  const partnerTrade = state?.partner?.trade ?? trades.find((t) => String(t.user_id) === String(partner.id));
+  const ownerStatus = ownerTrade
+    ? ownerTrade.confirmed
+      ? '✅ Confirmado'
+      : '⌛ Pendiente'
+    : '❌ Sin registrar';
+  const partnerStatus = partnerTrade
+    ? partnerTrade.confirmed
+      ? '✅ Confirmado'
+      : '⌛ Pendiente'
+    : '❌ Sin registrar';
+
+  const titleSuffix = state?.title ?? 'Seguimiento';
+  const baseDescription = 'Completa tus datos y confirma cuando estés listo.';
+  const descriptionLines = [baseDescription];
+  if (state?.summary && state.summary !== baseDescription) {
+    descriptionLines.push('', state.summary);
+  }
+
   const embed = applyDedosBrand(
     new EmbedBuilder()
-      .setTitle('📦 Panel del trade')
-      .setDescription('Completa tus datos y confirma cuando estés listo.')
+      .setTitle(`📦 Panel del trade — ${titleSuffix}`)
+      .setDescription(descriptionLines.join('\n'))
       .addFields(
         {
-          name: `${owner.displayName || owner.user?.username} — datos`,
+          name: `${owner.displayName || owner.user?.username || 'Trader 1'} — datos`,
           value: ownerTrade
-            ? `• Roblox: **${ownerTrade.roblox_username}**\n• Items: ${ownerTrade.items}\n• Estado: ${ownerTrade.confirmed ? '✅ Confirmado' : '⌛ Pendiente'}`
+            ? [
+                `• Roblox: **${ownerTrade.roblox_username}**`,
+                `• Ofrece: ${ownerTrade.items}`,
+                `• Confirmación: ${ownerStatus}`,
+              ].join('\n')
             : 'Sin datos registrados. Usa **Mis datos de trade**.',
           inline: false,
         },
         {
-          name: `${partner.displayName || partner.user?.username} — datos`,
+          name: `${partner.displayName || partner.user?.username || 'Trader 2'} — datos`,
           value: partnerTrade
-            ? `• Roblox: **${partnerTrade.roblox_username}**\n• Items: ${partnerTrade.items}\n• Estado: ${partnerTrade.confirmed ? '✅ Confirmado' : '⌛ Pendiente'}`
+            ? [
+                `• Roblox: **${partnerTrade.roblox_username}**`,
+                `• Ofrece: ${partnerTrade.items}`,
+                `• Confirmación: ${partnerStatus}`,
+              ].join('\n')
             : 'Sin datos registrados. Usa **Mis datos de trade**.',
           inline: false,
         }
       )
   );
+
+  if (state?.claimStatusLabel) {
+    embed.addFields({ name: 'Estado middleman', value: state.claimStatusLabel, inline: false });
+  }
 
   const buttons = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -133,7 +163,7 @@ export function buildTradePanel({ owner, partner, trades }) {
       .setCustomId(INTERACTION_IDS.MIDDLEMAN_BUTTON_CONFIRM)
       .setLabel('✅ Confirmar trade')
       .setStyle(ButtonStyle.Success)
-      .setDisabled(!ownerTrade && !partnerTrade),
+      .setDisabled(!(ownerTrade || partnerTrade)),
     new ButtonBuilder()
       .setCustomId(INTERACTION_IDS.MIDDLEMAN_BUTTON_HELP)
       .setLabel('🚨 Pedir ayuda')
@@ -223,8 +253,8 @@ export function buildTradeUpdateEmbed(title, description) {
   return { embeds: [embed], files: [createDedosAttachment()] };
 }
 
-export function buildDisabledPanel({ owner, partner, trades }) {
-  const base = buildTradePanel({ owner, partner, trades });
+export function buildDisabledPanel({ owner, partner, trades, state }) {
+  const base = buildTradePanel({ owner, partner, trades, state });
   const disabledRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(INTERACTION_IDS.MIDDLEMAN_BUTTON_DATA)

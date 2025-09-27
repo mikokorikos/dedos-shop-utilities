@@ -1,15 +1,21 @@
 import { pool } from './db.js';
+import { normalizeSnowflake } from '../utils/snowflake.js';
 
 export async function createClaim({ ticketId, middlemanUserId }) {
+  const normalized = normalizeSnowflake(middlemanUserId, { label: 'middlemanUserId' });
   await pool.query(
     'INSERT INTO mm_claims (ticket_id, middleman_user_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE middleman_user_id = VALUES(middleman_user_id), claimed_at = CURRENT_TIMESTAMP',
-    [ticketId, middlemanUserId]
+    [ticketId, normalized]
   );
 }
 
 export async function getClaimByTicket(ticketId) {
   const [rows] = await pool.query('SELECT * FROM mm_claims WHERE ticket_id = ? LIMIT 1', [ticketId]);
-  return rows[0] ?? null;
+  const claim = rows[0] ?? null;
+  if (claim) {
+    claim.middleman_user_id = normalizeSnowflake(claim.middleman_user_id, { label: 'middlemanUserId' });
+  }
+  return claim;
 }
 
 export async function markReviewRequested(ticketId) {

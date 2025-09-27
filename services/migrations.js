@@ -3,14 +3,14 @@ import { logger } from '../utils/logger.js';
 
 const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS users (
-    id BIGINT PRIMARY KEY,
+    id VARCHAR(20) PRIMARY KEY,
     roblox_id BIGINT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS warns (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
-    moderator_id BIGINT NULL,
+    user_id VARCHAR(20) NOT NULL,
+    moderator_id VARCHAR(20) NULL,
     reason TEXT,
     severity ENUM('minor','major','critical') DEFAULT 'minor',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -20,9 +20,9 @@ const MIGRATIONS = [
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS tickets (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    guild_id BIGINT NOT NULL,
-    channel_id BIGINT NOT NULL,
-    owner_id BIGINT NOT NULL,
+    guild_id VARCHAR(20) NOT NULL,
+    channel_id VARCHAR(20) NOT NULL,
+    owner_id VARCHAR(20) NOT NULL,
     type ENUM('buy','sell','robux','nitro','decor','mm') NOT NULL,
     status ENUM('open','closed','pending') DEFAULT 'open',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -33,7 +33,7 @@ const MIGRATIONS = [
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS ticket_participants (
     ticket_id INT NOT NULL,
-    user_id BIGINT NOT NULL,
+    user_id VARCHAR(20) NOT NULL,
     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(ticket_id, user_id),
     CONSTRAINT fk_tp_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
@@ -42,7 +42,7 @@ const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS mm_trades (
     id INT AUTO_INCREMENT PRIMARY KEY,
     ticket_id INT NOT NULL,
-    user_id BIGINT NOT NULL,
+    user_id VARCHAR(20) NOT NULL,
     roblox_username VARCHAR(255) NOT NULL,
     roblox_user_id BIGINT NULL,
     items TEXT NOT NULL,
@@ -56,7 +56,7 @@ const MIGRATIONS = [
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS middlemen (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    discord_user_id BIGINT NOT NULL UNIQUE,
+    discord_user_id VARCHAR(20) NOT NULL UNIQUE,
     roblox_username VARCHAR(255) NOT NULL,
     roblox_user_id BIGINT NULL,
     vouches_count INT NOT NULL DEFAULT 0,
@@ -69,8 +69,8 @@ const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS mm_reviews (
     id INT AUTO_INCREMENT PRIMARY KEY,
     ticket_id INT NOT NULL,
-    reviewer_user_id BIGINT NOT NULL,
-    middleman_user_id BIGINT NOT NULL,
+    reviewer_user_id VARCHAR(20) NOT NULL,
+    middleman_user_id VARCHAR(20) NOT NULL,
     stars TINYINT NOT NULL CHECK (stars BETWEEN 0 AND 5),
     review_text TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -81,7 +81,7 @@ const MIGRATIONS = [
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS mm_claims (
     ticket_id INT PRIMARY KEY,
-    middleman_user_id BIGINT NOT NULL,
+    middleman_user_id VARCHAR(20) NOT NULL,
     claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     review_requested_at TIMESTAMP NULL,
     closed_at TIMESTAMP NULL,

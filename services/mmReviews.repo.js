@@ -1,4 +1,5 @@
 import { pool } from './db.js';
+import { normalizeSnowflake } from '../utils/snowflake.js';
 
 export class DuplicateReviewError extends Error {
   constructor(message = 'Duplicate review') {
@@ -8,10 +9,12 @@ export class DuplicateReviewError extends Error {
 }
 
 export async function createReview({ ticketId, reviewerUserId, middlemanUserId, stars, reviewText }) {
+  const reviewer = normalizeSnowflake(reviewerUserId, { label: 'reviewerUserId' });
+  const middleman = normalizeSnowflake(middlemanUserId, { label: 'middlemanUserId' });
   try {
     const [result] = await pool.query(
       'INSERT INTO mm_reviews (ticket_id, reviewer_user_id, middleman_user_id, stars, review_text) VALUES (?, ?, ?, ?, ?)',
-      [ticketId, reviewerUserId, middlemanUserId, stars, reviewText ?? null]
+      [ticketId, reviewer, middleman, stars, reviewText ?? null]
     );
     return result.insertId;
   } catch (error) {
@@ -33,9 +36,10 @@ export async function getReviewsForTicket(ticketId) {
 }
 
 export async function hasReviewFromUser(ticketId, reviewerUserId) {
+  const reviewer = normalizeSnowflake(reviewerUserId, { label: 'reviewerUserId' });
   const [rows] = await pool.query(
     'SELECT 1 FROM mm_reviews WHERE ticket_id = ? AND reviewer_user_id = ? LIMIT 1',
-    [ticketId, reviewerUserId]
+    [ticketId, reviewer]
   );
   return Boolean(rows[0]);
 }
