@@ -1,3 +1,4 @@
+import { MessageFlags } from 'discord.js';
 import { CONFIG } from '../config/config.js';
 import { noPermissionEmbed } from './branding.js';
 import { checkCooldown } from './cooldowns.js';
@@ -20,14 +21,19 @@ async function resolveMember(ctx, userId) {
 }
 
 async function sendResponse(ctx, payload, { ephemeral } = {}) {
+  const useEphemeral = ephemeral ?? true;
+  const responsePayload = useEphemeral ? { ...payload, flags: MessageFlags.Ephemeral } : payload;
   if ('reply' in ctx && typeof ctx.reply === 'function') {
-    return ctx.reply({ ...payload, ephemeral: ephemeral ?? true });
+    return ctx.reply(responsePayload);
   }
   if ('followUp' in ctx && typeof ctx.followUp === 'function') {
-    return ctx.followUp({ ...payload, ephemeral: ephemeral ?? true });
+    return ctx.followUp(responsePayload);
   }
   if ('channel' in ctx && typeof ctx.channel?.send === 'function') {
-    return ctx.reply?.(payload) ?? ctx.channel.send(payload);
+    if (ctx.reply) {
+      return ctx.reply(responsePayload);
+    }
+    return ctx.channel.send(useEphemeral ? payload : responsePayload);
   }
   throw new Error('Contexto no soportado para respuesta');
 }

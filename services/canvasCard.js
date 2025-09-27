@@ -1,5 +1,6 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { AttachmentBuilder } from 'discord.js';
+import { logger } from '../utils/logger.js';
 
 const CANVAS_W = 1000;
 const CANVAS_H = 260;
@@ -7,6 +8,21 @@ const SCALE = 2;
 
 const fetchImpl =
   globalThis.fetch ?? ((...args) => import('node-fetch').then(({ default: f }) => f(...args)));
+
+const DEFAULT_AVATAR_SVG = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 352 352">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#10172A" />
+      <stop offset="1" stop-color="#0B1120" />
+    </linearGradient>
+  </defs>
+  <rect width="352" height="352" fill="url(#bg)" />
+  <circle cx="176" cy="132" r="88" fill="#1F2937" stroke="#2563EB" stroke-width="16" />
+  <path d="M88 308c0-56 40-96 88-96s88 40 88 96" fill="#1E293B" stroke="#2563EB" stroke-width="16" stroke-linecap="round" />
+</svg>`;
+
+const DEFAULT_AVATAR_URL = `data:image/svg+xml;utf8,${encodeURIComponent(DEFAULT_AVATAR_SVG)}`;
 
 const profileCache = new Map();
 
@@ -43,16 +59,42 @@ async function getRobloxInfo(userId) {
   }
   const userData = await userRes.json();
 
-  const avatarRes = await fetchImpl(
-    `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=352x352&format=Png&isCircular=false`
-  );
-  if (!avatarRes.ok) {
-    throw new Error(`Roblox avatar fetch failed with status ${avatarRes.status}`);
+  let avatarUrl = null;
+  try {
+    const avatarRes = await fetchImpl(
+      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=352x352&format=Png&isCircular=false`
+    );
+    if (avatarRes.ok) {
+      const avatarData = await avatarRes.json();
+      avatarUrl = avatarData?.data?.[0]?.imageUrl ?? null;
+    } else {
+      logger.warn('Fallo al obtener avatar principal de Roblox', { userId, status: avatarRes.status });
+    }
+  } catch (error) {
+    logger.warn('Error solicitando avatar principal de Roblox', { userId, error: error.message });
   }
-  const avatarData = await avatarRes.json();
-  const avatarUrl = avatarData?.data?.[0]?.imageUrl;
+
   if (!avatarUrl) {
-    throw new Error('No se pudo obtener el avatar de Roblox');
+    try {
+      const fallbackRes = await fetchImpl(
+        `https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=352&height=352`
+      );
+      if (fallbackRes.ok) {
+        avatarUrl = fallbackRes.url;
+      } else {
+        logger.info('Fallback de avatar de Roblox devolvió estado inesperado', {
+          userId,
+          status: fallbackRes.status,
+        });
+      }
+    } catch (error) {
+      logger.info('Error obteniendo fallback de avatar de Roblox', { userId, error: error.message });
+    }
+  }
+
+  if (!avatarUrl) {
+    logger.debug('Usando avatar por defecto para Roblox', { userId });
+    avatarUrl = DEFAULT_AVATAR_URL;
   }
 
   const payload = { username: userData.name, avatarUrl };
@@ -213,7 +255,16 @@ async function renderCard({ username, avatarUrl, rating, ratingCount, vouches })
   const contentEndX = panel.x + panel.w - PADDING;
   const availableContentWidth = contentEndX - contentStartX;
 
-  const avatarImg = await loadImage(avatarUrl);
+  let avatarImg;
+  try {
+    avatarImg = await loadImage(avatarUrl);
+  } catch (error) {
+    logger.warn('Fallo al cargar avatar para tarjeta, usando placeholder', {
+      avatarUrl,
+      error: error.message,
+    });
+    avatarImg = await loadImage(DEFAULT_AVATAR_URL);
+  }
 
   ctx.save();
   ctx.fillStyle = 'rgba(0,0,0,0.55)';

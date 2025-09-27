@@ -1,5 +1,6 @@
 import {
   ChannelType,
+  MessageFlags,
   OverwriteType,
   PermissionFlagsBits,
 } from 'discord.js';
@@ -62,6 +63,7 @@ import { assertRobloxUser } from '../../utils/roblox.js';
 import { logger } from '../../utils/logger.js';
 import { generateForRobloxUser } from '../../services/canvasCard.js';
 import { userIsAdmin } from '../../utils/permissions.js';
+import { normalizeSnowflakeArray } from '../../utils/snowflake.js';
 
 const tradePanelMessages = new Map();
 
@@ -124,14 +126,18 @@ async function fetchParticipants(guild, ticket) {
 }
 
 async function sendCommandReply(ctx, payload, { ephemeral = false } = {}) {
+  const responsePayload = ephemeral ? { ...payload, flags: MessageFlags.Ephemeral } : payload;
   if ('reply' in ctx && typeof ctx.reply === 'function') {
-    return ctx.reply({ ...payload, ephemeral });
+    return ctx.reply(responsePayload);
   }
   if ('followUp' in ctx && typeof ctx.followUp === 'function') {
-    return ctx.followUp({ ...payload, ephemeral });
+    return ctx.followUp(responsePayload);
   }
   if ('channel' in ctx && typeof ctx.channel?.send === 'function') {
-    return ctx.channel.send(payload);
+    if (ephemeral && typeof ctx.reply === 'function') {
+      return ctx.reply(responsePayload);
+    }
+    return ctx.channel.send(responsePayload);
   }
   throw new Error('No se pudo responder al comando middleman');
 }
@@ -141,6 +147,14 @@ function computeAverageFromRecord(record) {
   const sum = Number(record.rating_sum ?? 0);
   const count = Number(record.rating_count ?? 0);
   return count > 0 ? sum / count : 0;
+}
+
+function buildUserAllowedMentions(users) {
+  const normalized = normalizeSnowflakeArray(users, { label: 'mención de usuario' });
+  if (!normalized.length) {
+    return { parse: [] };
+  }
+  return { users: normalized };
 }
 
 const SNOWFLAKE_REGEX = /^\d{17,20}$/;
@@ -169,6 +183,156 @@ function resolveParticipantIds(ticket, participants) {
   return { ownerId, partnerId };
 }
 
+function resolveParticipantRole(userId, ticket, participants) {
+  const normalized = normalizeSnowflake(userId);
+  if (!normalized) {
+    return 'unknown';
+  }
+  const { ownerId, partnerId } = resolveParticipantIds(ticket, participants);
+  if (normalized === ownerId) {
+    return 'owner';
+  }
+  if (normalized === partnerId) {
+    return 'partner';
+  }
+  return 'guest';
+}
+
+function sanitizeChannelSegment(value, fallback) {
+  const base = String(value ?? fallback ?? 'usuario')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return base ? base.slice(0, 16) : 'usuario';
+}
+
+function buildChannelStatusName({ owner, partner, state }) {
+  const prefix = state?.channelStatus ?? 'mm';
+  const ownerSegment = sanitizeChannelSegment(owner?.displayName ?? owner?.user?.username, 'owner');
+  const partnerSegment = sanitizeChannelSegment(partner?.displayName ?? partner?.user?.username, 'partner');
+  const composed = [prefix, ownerSegment, partnerSegment].filter(Boolean).join('-');
+  return composed.slice(0, 90);
+}
+
+function formatMention(target) {
+  if (!target) return 'al otro trader';
+  if (typeof target.toString === 'function') {
+    const value = target.toString();
+    if (value) return value;
+  }
+  const id = normalizeSnowflake(target.id ?? target.user?.id);
+  return id ? `<@${id}>` : 'al otro trader';
+}
+
+function computeTradeState({ ticket, trades, claim, participants }) {
+  const { ownerId, partnerId } = resolveParticipantIds(ticket, participants);
+  const ownerTrade = ownerId ? trades.find((t) => String(t.user_id) === String(ownerId)) ?? null : null;
+  const partnerTrade = partnerId ? trades.find((t) => String(t.user_id) === String(partnerId)) ?? null : null;
+  const ownerConfirmed = Boolean(ownerTrade?.confirmed);
+  const partnerConfirmed = Boolean(partnerTrade?.confirmed);
+  const ownerHasData = Boolean(ownerTrade);
+  const partnerHasData = Boolean(partnerTrade);
+  const pendingUsers = [];
+  if (!ownerConfirmed) pendingUsers.push(participants.owner);
+  if (!partnerConfirmed) pendingUsers.push(participants.partner);
+  const everyoneConfirmed = ownerConfirmed && partnerConfirmed;
+  const tradeStatusKey = everyoneConfirmed ? 'confirmed' : 'not-confirmed';
+  const claimStatus = claim?.closed_at ? 'closed' : claim ? 'claimed' : 'unclaimed';
+
+  let summary = 'Completa tus datos y confirma cuando estés listo.';
+  if (!ownerHasData || !partnerHasData) {
+    summary = 'Ambos deben registrar sus datos de trade antes de confirmar.';
+  } else if (!everyoneConfirmed) {
+    const pendingMentions = pendingUsers
+      .filter(Boolean)
+      .map((user) => formatMention(user))
+      .filter(Boolean);
+    if (pendingMentions.length === 1) {
+      summary = `Esperando confirmación de ${pendingMentions[0]}.`;
+    } else if (pendingMentions.length === 2) {
+      summary = `Esperando confirmación de ${pendingMentions[0]} y ${pendingMentions[1]}.`;
+    }
+  } else if (claimStatus === 'unclaimed') {
+    summary = 'Trade listo. Espera a que un middleman lo reclame.';
+  } else if (claimStatus === 'claimed') {
+    summary = claim?.middleman_user_id
+      ? `Middleman atendiendo: <@${claim.middleman_user_id}>.`
+      : 'Middleman atendiendo el trade.';
+  } else if (claimStatus === 'closed') {
+    summary = 'Trade finalizado.';
+  }
+
+  let title = 'Seguimiento';
+  if (!ownerHasData || !partnerHasData) {
+    title = 'Datos pendientes';
+  } else if (!everyoneConfirmed) {
+    title = 'Confirmaciones pendientes';
+  } else if (claimStatus === 'unclaimed') {
+    title = 'Esperando middleman';
+  } else if (claimStatus === 'claimed') {
+    title = 'Atendido por middleman';
+  } else if (claimStatus === 'closed') {
+    title = 'Cerrado';
+  }
+
+  let claimStatusLabel = null;
+  if (claimStatus === 'claimed') {
+    claimStatusLabel = claim?.middleman_user_id
+      ? `Reclamado por <@${claim.middleman_user_id}>`
+      : 'Reclamado por un middleman.';
+  } else if (claimStatus === 'unclaimed') {
+    claimStatusLabel = 'Aún no ha sido reclamado por un middleman.';
+  } else if (claimStatus === 'closed') {
+    claimStatusLabel = 'Este trade fue cerrado.';
+  }
+
+  const channelStatus = ticket.status === 'closed' ? 'mm-closed' : `mm-${tradeStatusKey}-${claimStatus}`;
+
+  return {
+    owner: { trade: ownerTrade, hasData: ownerHasData, confirmed: ownerConfirmed },
+    partner: { trade: partnerTrade, hasData: partnerHasData, confirmed: partnerConfirmed },
+    tradeStatus: tradeStatusKey,
+    claimStatus,
+    claimStatusLabel,
+    summary,
+    title,
+    everyoneConfirmed,
+    channelStatus,
+    middlemanId: claim?.middleman_user_id ?? null,
+  };
+}
+
+async function applyChannelStatus(channel, { owner, partner, state }) {
+  if (!state) return;
+  const nextName = buildChannelStatusName({ owner, partner, state });
+  if (!nextName || channel.name === nextName) {
+    return;
+  }
+  try {
+    await channel.setName(nextName);
+  } catch (error) {
+    logger.warn('No se pudo actualizar el nombre del canal middleman', channel.id, nextName, error);
+  }
+}
+
+function isTradeParticipant(userId, ticket, participants) {
+  const { ownerId, partnerId } = resolveParticipantIds(ticket, participants);
+  const normalized = normalizeSnowflake(userId);
+  return Boolean(normalized && [ownerId, partnerId].filter(Boolean).some((id) => String(id) === normalized));
+}
+
+async function ensureTraderAccess(interaction, ticket, participants) {
+  if (isTradeParticipant(interaction.user.id, ticket, participants)) {
+    return true;
+  }
+  await interaction.reply({
+    ...buildTradeUpdateEmbed('⛔ No participas en el trade', 'Solo los traders pueden usar este botón.'),
+    flags: MessageFlags.Ephemeral,
+  });
+  return false;
+}
+
 async function updateSendPermission(channel, userId, value) {
   const targetId = normalizeSnowflake(userId);
   if (!targetId) {
@@ -192,11 +356,25 @@ async function updateSendPermission(channel, userId, value) {
   const overwriteOptions =
     typeof OverwriteType?.Member === 'number' ? { type: OverwriteType.Member } : undefined;
 
+  const threadDenies = {
+    SendMessagesInThreads: false,
+    CreatePublicThreads: false,
+    CreatePrivateThreads: false,
+  };
+  if ('CreateForumThreads' in PermissionFlagsBits) {
+    threadDenies.CreateForumThreads = false;
+  }
+
+  const payload = {
+    ...threadDenies,
+    SendMessages: value,
+  };
+
   try {
     if (overwriteOptions) {
-      await channel.permissionOverwrites.edit(user, { SendMessages: value }, overwriteOptions);
+      await channel.permissionOverwrites.edit(user, payload, overwriteOptions);
     } else {
-      await channel.permissionOverwrites.edit(user, { SendMessages: value });
+      await channel.permissionOverwrites.edit(user, payload);
     }
     return true;
   } catch (error) {
@@ -297,38 +475,43 @@ async function ensurePanelMessage(channel, { owner, partner, disabled } = {}) {
   const ticket = await getTicketByChannel(channel.id);
   if (!ticket) {
     logger.warn('No se encontró ticket asociado al canal', channel.id);
-    return null;
+    return { message: null, state: null };
   }
   const trades = await getTradesByTicket(ticket.id);
-  let ownerMember = owner;
-  let partnerMember = partner;
-  if (!ownerMember || !partnerMember) {
-    const participants = await fetchParticipants(channel.guild, ticket);
-    ownerMember = ownerMember ?? participants.owner;
-    partnerMember = partnerMember ?? participants.partner;
-  }
+  const claim = await getClaimByTicket(ticket.id);
+  const participants = await fetchParticipants(channel.guild, ticket);
+  const ownerMember = owner ?? participants.owner;
+  const partnerMember = partner ?? participants.partner;
+  const normalizedParticipants = {
+    ...participants,
+    owner: ownerMember,
+    partner: partnerMember,
+  };
+  const state = computeTradeState({ ticket, trades, claim, participants: normalizedParticipants });
   const payload = disabled
-    ? buildDisabledPanel({ owner: ownerMember, partner: partnerMember, trades })
-    : buildTradePanel({ owner: ownerMember, partner: partnerMember, trades });
+    ? buildDisabledPanel({ owner: ownerMember, partner: partnerMember, trades, state })
+    : buildTradePanel({ owner: ownerMember, partner: partnerMember, trades, state });
   const existingId = tradePanelMessages.get(channel.id);
   if (existingId) {
     try {
       const message = await channel.messages.fetch(existingId);
       await message.edit({ ...payload, allowedMentions: { parse: [] } });
-      return message;
+      await applyChannelStatus(channel, { owner: ownerMember, partner: partnerMember, state });
+      return { message, state };
     } catch (error) {
       logger.warn('No se pudo actualizar panel, creando uno nuevo', error);
     }
   }
   const message = await channel.send({ ...payload, allowedMentions: { parse: [] } });
   tradePanelMessages.set(channel.id, message.id);
-  return message;
+  await applyChannelStatus(channel, { owner: ownerMember, partner: partnerMember, state });
+  return { message, state };
 }
 
 export async function handleMiddlemanCommand(ctx) {
   const panel = buildMiddlemanPanel();
   if ('reply' in ctx && typeof ctx.reply === 'function') {
-    await ctx.reply({ ...panel, ephemeral: false, allowedMentions: { parse: [] } });
+    await ctx.reply({ ...panel, allowedMentions: { parse: [] } });
   } else if ('channel' in ctx) {
     await ctx.reply?.({ ...panel, allowedMentions: { parse: [] } }) ?? ctx.channel.send({ ...panel, allowedMentions: { parse: [] } });
   }
@@ -553,7 +736,7 @@ export async function handleMiddlemanMenu(interaction) {
   const [value] = interaction.values;
   if (value === 'info') {
     const info = buildMiddlemanInfo();
-    await interaction.reply({ ...info, ephemeral: true, allowedMentions: { parse: [] } });
+    await interaction.reply({ ...info, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
     return;
   }
   if (value === 'open') {
@@ -561,13 +744,13 @@ export async function handleMiddlemanMenu(interaction) {
     const openCount = await countOpenTicketsByUser(interaction.user.id, TICKET_TYPES.MIDDLEMAN);
     if (openCount >= CONFIG.MIDDLEMAN.MAX_TICKETS_PER_USER) {
       const limitEmbed = buildTicketLimitEmbed(CONFIG.MIDDLEMAN.MAX_TICKETS_PER_USER);
-      await interaction.reply({ ...limitEmbed, ephemeral: true });
+      await interaction.reply({ ...limitEmbed, flags: MessageFlags.Ephemeral });
       return;
     }
     const { allowed, remainingMs } = checkCooldown(interaction.user.id, 'middleman_open', CONFIG.MIDDLEMAN.TICKET_COOLDOWN_MS);
     if (!allowed) {
       const cooldownEmbed = buildCooldownEmbed(remainingMs);
-      await interaction.reply({ ...cooldownEmbed, ephemeral: true });
+      await interaction.reply({ ...cooldownEmbed, flags: MessageFlags.Ephemeral });
       return;
     }
     const modal = buildPartnerModal();
@@ -597,17 +780,26 @@ async function createMiddlemanChannel({ interaction, partnerMember, context }) {
   const channelName = `${baseName}-${partnerPart}`.slice(0, 90);
 
   const parent = CONFIG.MIDDLEMAN.CATEGORY_ID ?? interaction.channel?.parentId ?? null;
+  const traderDenies = [
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.SendMessagesInThreads,
+    PermissionFlagsBits.CreatePublicThreads,
+    PermissionFlagsBits.CreatePrivateThreads,
+  ];
+  if ('CreateForumThreads' in PermissionFlagsBits) {
+    traderDenies.push(PermissionFlagsBits.CreateForumThreads);
+  }
   const overwrites = [
     { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
     {
       id: ownerMember.id,
       allow: [PermissionFlagsBits.ViewChannel],
-      deny: [PermissionFlagsBits.SendMessages],
+      deny: traderDenies,
     },
     {
       id: partnerMember.id,
       allow: [PermissionFlagsBits.ViewChannel],
-      deny: [PermissionFlagsBits.SendMessages],
+      deny: traderDenies,
     },
   ];
   if (CONFIG.ADMIN_ROLE_ID) {
@@ -655,7 +847,7 @@ async function createMiddlemanChannel({ interaction, partnerMember, context }) {
 export async function handleMiddlemanModal(interaction) {
   const partnerInput = interaction.fields.getTextInputValue('partner');
   const context = interaction.fields.getTextInputValue('context');
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const partnerMember = await resolvePartnerMember(interaction.guild, partnerInput);
   if (!partnerMember) {
     const errorEmbed = buildTradeUpdateEmbed('❌ No encontramos al partner', 'Verifica que esté en el servidor e intenta de nuevo.');
@@ -680,21 +872,28 @@ export async function handleMiddlemanModal(interaction) {
     return;
   }
   const confirmation = buildTradeUpdateEmbed('✅ Middleman creado', `Se creó el canal ${channel} y se notificó a tu partner.`);
-  await interaction.editReply({ ...confirmation, allowedMentions: { users: [partnerMember.id] } });
+  await interaction.editReply({ ...confirmation, allowedMentions: buildUserAllowedMentions([partnerMember.id]) });
   logger.flow('Middleman creado', interaction.user.id, '->', partnerMember.id, 'canal', channel.id);
 }
 
 export async function handleTradeModal(interaction) {
   const ticket = await getTicketByChannel(interaction.channel.id);
   if (!ticket) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Ticket no encontrado', 'No se encontró información del trade.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('❌ Ticket no encontrado', 'No se encontró información del trade.'),
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  const participants = await fetchParticipants(interaction.guild, ticket);
+  if (!(await ensureTraderAccess(interaction, ticket, participants))) {
     return;
   }
   const robloxUsername = interaction.fields.getTextInputValue('roblox_username').trim();
   const items = interaction.fields.getTextInputValue('items').trim();
   const lookup = await assertRobloxUser(robloxUsername);
   if (!lookup.exists) {
-    await interaction.reply({ ...buildRobloxErrorEmbed(robloxUsername), ephemeral: true });
+    await interaction.reply({ ...buildRobloxErrorEmbed(robloxUsername), flags: MessageFlags.Ephemeral });
     return;
   }
   await ensureUser(interaction.user.id);
@@ -706,9 +905,28 @@ export async function handleTradeModal(interaction) {
     items,
   });
   await resetTradeConfirmation(ticket.id, interaction.user.id);
-  const participants = await fetchParticipants(interaction.guild, ticket);
-  await ensurePanelMessage(interaction.channel, { owner: participants.owner, partner: participants.partner });
-  await interaction.reply({ ...buildTradeUpdateEmbed('📝 Datos actualizados', 'Tu información de trade se guardó correctamente.'), ephemeral: true });
+  const { state } = await ensurePanelMessage(interaction.channel, {
+    owner: participants.owner,
+    partner: participants.partner,
+  });
+  await interaction.reply({
+    ...buildTradeUpdateEmbed('📝 Datos actualizados', 'Tu información de trade se guardó correctamente.'),
+    flags: MessageFlags.Ephemeral,
+  });
+  const role = resolveParticipantRole(interaction.user.id, ticket, participants);
+  const dataCount = Number(Boolean(state?.owner?.hasData)) + Number(Boolean(state?.partner?.hasData));
+  const confirmedCount = Number(Boolean(state?.owner?.confirmed)) + Number(Boolean(state?.partner?.confirmed));
+  logger.flow('Datos de trade registrados', {
+    ticketId: ticket.id,
+    channelId: interaction.channel.id,
+    userId: String(interaction.user.id),
+    role,
+    robloxUser: lookup.user.id,
+    robloxUsername: lookup.user.name,
+    items,
+    dataProgress: `${dataCount}/2`,
+    confirmedProgress: `${confirmedCount}/2`,
+  });
   if (lookup.user.isYoungerThanYear) {
     await interaction.channel.send({ ...buildRobloxWarningEmbed(lookup.user.name), allowedMentions: { parse: [] } });
   }
@@ -717,40 +935,92 @@ export async function handleTradeModal(interaction) {
 export async function handleTradeConfirm(interaction) {
   const ticket = await getTicketByChannel(interaction.channel.id);
   if (!ticket) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Ticket no encontrado', 'No se encontró información del trade.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('❌ Ticket no encontrado', 'No se encontró información del trade.'),
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  const participants = await fetchParticipants(interaction.guild, ticket);
+  if (!(await ensureTraderAccess(interaction, ticket, participants))) {
     return;
   }
   const trade = await getTrade(ticket.id, interaction.user.id);
   if (!trade) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('📝 Falta información', 'Primero registra tus datos con el botón **Mis datos de trade**.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('📝 Falta información', 'Primero registra tus datos con el botón **Mis datos de trade**.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   if (trade.confirmed) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('✅ Ya confirmaste', 'Tu confirmación ya fue registrada.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('✅ Ya confirmaste', 'Tu confirmación ya fue registrada.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   await setTradeConfirmed(ticket.id, interaction.user.id);
-  const participants = await fetchParticipants(interaction.guild, ticket);
-  await ensurePanelMessage(interaction.channel, { owner: participants.owner, partner: participants.partner });
-  await interaction.reply({ ...buildTradeUpdateEmbed('✅ Confirmado', 'Tu confirmación quedó registrada. Espera a que la otra parte confirme.'), ephemeral: true });
-  const trades = await getTradesByTicket(ticket.id);
-  if (trades.every((t) => t.confirmed)) {
+  const { state } = await ensurePanelMessage(interaction.channel, {
+    owner: participants.owner,
+    partner: participants.partner,
+  });
+  await interaction.reply({
+    ...buildTradeUpdateEmbed('✅ Confirmado', 'Tu confirmación quedó registrada. Espera a que la otra parte confirme.'),
+    flags: MessageFlags.Ephemeral,
+  });
+  const role = resolveParticipantRole(interaction.user.id, ticket, participants);
+  const confirmedCount = Number(Boolean(state?.owner?.confirmed)) + Number(Boolean(state?.partner?.confirmed));
+  logger.flow('Confirmación registrada', {
+    ticketId: ticket.id,
+    channelId: interaction.channel.id,
+    userId: String(interaction.user.id),
+    role,
+    confirmedProgress: `${confirmedCount}/2`,
+    everyoneConfirmed: Boolean(state?.everyoneConfirmed),
+  });
+  if (state?.everyoneConfirmed && state?.owner?.hasData && state?.partner?.hasData) {
     const { ownerId, partnerId } = resolveParticipantIds(ticket, participants);
     const targetsToLock = [ownerId, partnerId].filter(Boolean);
     if (targetsToLock.length === 0) {
       logger.warn('No se encontraron participantes válidos para bloquear el canal middleman', ticket.id, interaction.channel.id);
     }
     await Promise.all(targetsToLock.map((id) => updateSendPermission(interaction.channel, id, false)));
-    await ensurePanelMessage(interaction.channel, { owner: participants.owner, partner: participants.partner, disabled: true });
-    await interaction.followUp({
-      ...buildTradeLockedEmbed(CONFIG.MM_ROLE_ID),
-      allowedMentions: { roles: CONFIG.MM_ROLE_ID ? [CONFIG.MM_ROLE_ID] : [] },
-      ephemeral: false,
+    logger.flow('Canal bloqueado tras confirmaciones completas', {
+      ticketId: ticket.id,
+      channelId: interaction.channel.id,
+      participants: targetsToLock,
     });
-    await interaction.channel.send({
-      ...buildClaimPromptEmbed(CONFIG.MM_ROLE_ID),
-      allowedMentions: { roles: CONFIG.MM_ROLE_ID ? [CONFIG.MM_ROLE_ID] : [] },
+    await ensurePanelMessage(interaction.channel, {
+      owner: participants.owner,
+      partner: participants.partner,
+      disabled: true,
     });
+    if (state?.claimStatus === 'unclaimed') {
+      await interaction.followUp({
+        ...buildTradeLockedEmbed(CONFIG.MM_ROLE_ID),
+        allowedMentions: { roles: CONFIG.MM_ROLE_ID ? [CONFIG.MM_ROLE_ID] : [] },
+      });
+      logger.flow('Notificación de trade listo enviada', {
+        ticketId: ticket.id,
+        channelId: interaction.channel.id,
+        mentionedRole: CONFIG.MM_ROLE_ID ?? null,
+      });
+      await interaction.channel.send({
+        ...buildClaimPromptEmbed(CONFIG.MM_ROLE_ID),
+        allowedMentions: { roles: CONFIG.MM_ROLE_ID ? [CONFIG.MM_ROLE_ID] : [] },
+      });
+      logger.flow('Solicitud de reclamo publicada', {
+        ticketId: ticket.id,
+        channelId: interaction.channel.id,
+      });
+    } else {
+      logger.flow('Confirmaciones completas con middleman asignado', {
+        ticketId: ticket.id,
+        channelId: interaction.channel.id,
+        middlemanId: state?.middlemanId ?? null,
+      });
+    }
     const claim = await getClaimByTicket(ticket.id);
     if (claim && !claim.vouched) {
       await incrementMiddlemanVouch(claim.middleman_user_id);
@@ -763,7 +1033,10 @@ export async function handleTradeConfirm(interaction) {
 export async function handleTradeHelp(interaction) {
   const ticket = await getTicketByChannel(interaction.channel.id);
   if (!ticket) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Ticket no encontrado', 'No se encontró información del trade.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('❌ Ticket no encontrado', 'No se encontró información del trade.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   const participants = await fetchParticipants(interaction.guild, ticket);
@@ -778,12 +1051,17 @@ export async function handleTradeHelp(interaction) {
   setTimeout(async () => {
     try {
       await Promise.all(targetsToUnlock.map((id) => updateSendPermission(interaction.channel, id, false)));
-      const updatedTrades = await getTradesByTicket(ticket.id);
-      await ensurePanelMessage(interaction.channel, {
+      const { state } = await ensurePanelMessage(interaction.channel, {
         owner: participants.owner,
         partner: participants.partner,
-        disabled: updatedTrades.every((t) => t.confirmed),
       });
+      if (state?.everyoneConfirmed && state?.owner?.hasData && state?.partner?.hasData) {
+        await ensurePanelMessage(interaction.channel, {
+          owner: participants.owner,
+          partner: participants.partner,
+          disabled: true,
+        });
+      }
       await interaction.channel.send({ ...buildTradeUpdateEmbed('🔒 Canal relockeado', 'Se restauraron los permisos después de la solicitud de ayuda.'), allowedMentions: { parse: [] } });
     } catch (error) {
       logger.warn('No se pudo relockear canal tras ayuda', error);
@@ -820,12 +1098,14 @@ async function finalizeTrade({ channel, ticket, forced = false, executorId = nul
   if (forced) {
     payload.embeds[0].addFields({ name: 'Estado del cierre', value: 'Forzado por el staff/middleman', inline: false });
   }
-  const allowedMentions = {
-    users: [claim.middleman_user_id, participants.owner?.id, participants.partner?.id]
-      .filter(Boolean)
-      .map((id) => String(id)),
-  };
-  await channel.send({ ...payload, allowedMentions });
+  await channel.send({
+    ...payload,
+    allowedMentions: buildUserAllowedMentions([
+      claim.middleman_user_id,
+      participants.owner?.id,
+      participants.partner?.id,
+    ]),
+  });
 
   const logsChannelId = CONFIG.TRADE_LOGS_CHANNEL_ID;
   if (logsChannelId) {
@@ -857,6 +1137,11 @@ async function finalizeTrade({ channel, ticket, forced = false, executorId = nul
 
   await markClaimClosed(ticket.id, { forced });
   await setTicketStatus(ticket.id, 'closed');
+  await ensurePanelMessage(channel, {
+    owner: participants.owner,
+    partner: participants.partner,
+    disabled: true,
+  });
   if (forced) {
     logger.warn('Trade cerrado forzosamente', ticket.id, 'por', executorId ?? 'desconocido');
   } else {
@@ -870,22 +1155,34 @@ async function handleClaimButton(interaction) {
   const isAdmin = userIsAdmin(member, CONFIG.ADMIN_ROLE_ID);
   const isMiddleman = member?.roles?.cache?.has(CONFIG.MM_ROLE_ID);
   if (!isAdmin && !isMiddleman) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('⛔ Permisos insuficientes', 'Solo middlemans o admins pueden reclamar este ticket.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('⛔ Permisos insuficientes', 'Solo middlemans o admins pueden reclamar este ticket.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   const ticket = await getTicketByChannel(interaction.channel.id);
   if (!ticket) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Ticket inválido', 'No se encontró información para este canal.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('❌ Ticket inválido', 'No se encontró información para este canal.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   const existing = await getClaimByTicket(ticket.id);
   if (existing && String(existing.middleman_user_id) !== String(interaction.user.id)) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('⏳ Ya reclamado', 'Otro middleman ya está atendiendo este ticket.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('⏳ Ya reclamado', 'Otro middleman ya está atendiendo este ticket.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   const middleman = await getMiddlemanByDiscordId(interaction.user.id);
   if (!middleman) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('❌ No registrado', 'No estás en la base de datos de middlemans. Solicita a un admin que te registre.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('❌ No registrado', 'No estás en la base de datos de middlemans. Solicita a un admin que te registre.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   await createClaim({ ticketId: ticket.id, middlemanUserId: interaction.user.id });
@@ -909,7 +1206,9 @@ async function handleClaimButton(interaction) {
   if (card) {
     files.push(card);
   }
-  await interaction.reply({ ...payload, files, allowedMentions: { users: [interaction.user.id] } });
+  await interaction.reply({ ...payload, files, allowedMentions: buildUserAllowedMentions([interaction.user.id]) });
+  const participants = await fetchParticipants(interaction.guild, ticket);
+  await ensurePanelMessage(interaction.channel, { owner: participants.owner, partner: participants.partner });
   try {
     const disabledRow = claimRow();
     disabledRow.components[0].setDisabled(true);
@@ -918,7 +1217,10 @@ async function handleClaimButton(interaction) {
     logger.warn('No se pudo deshabilitar botón de reclamo', error);
   }
   const reviewPrompt = buildReviewPromptForMiddleman(interaction.user.toString());
-  await interaction.channel.send({ ...reviewPrompt, allowedMentions: { users: [interaction.user.id] } });
+  await interaction.channel.send({
+    ...reviewPrompt,
+    allowedMentions: buildUserAllowedMentions([interaction.user.id]),
+  });
   logger.flow('MM', interaction.user.tag, 'reclamó ticket', interaction.channel.id);
 }
 
@@ -927,21 +1229,42 @@ async function handleRequestReviewsButton(interaction) {
   const isAdmin = userIsAdmin(member, CONFIG.ADMIN_ROLE_ID);
   const ticket = await getTicketByChannel(interaction.channel.id);
   if (!ticket) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Ticket inválido', 'No se encontró información para este canal.'), ephemeral: true });
+    logger.warn('Solicitud de reseñas sin ticket asociado', interaction.channel.id, interaction.user.id);
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('❌ Ticket inválido', 'No se encontró información para este canal.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   const claim = await getClaimByTicket(ticket.id);
   if (!claim) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Sin middleman', 'Debes reclamar el ticket antes de solicitar reseñas.'), ephemeral: true });
+    logger.warn('Solicitud de reseñas sin middleman', { ticketId: ticket.id, channelId: interaction.channel.id, requestedBy: interaction.user.id });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('❌ Sin middleman', 'Debes reclamar el ticket antes de solicitar reseñas.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   const isOwner = String(claim.middleman_user_id) === String(interaction.user.id);
   if (!isOwner && !isAdmin) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('⛔ Permisos insuficientes', 'Solo el middleman asignado puede solicitar reseñas.'), ephemeral: true });
+    logger.warn('Intento inválido de solicitar reseñas', {
+      ticketId: ticket.id,
+      channelId: interaction.channel.id,
+      claimOwner: claim.middleman_user_id,
+      requestedBy: interaction.user.id,
+    });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('⛔ Permisos insuficientes', 'Solo el middleman asignado puede solicitar reseñas.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   if (claim.review_requested_at) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('ℹ️ Ya enviado', 'Las reseñas ya fueron solicitadas en este ticket.'), ephemeral: true });
+    logger.info('Solicitud de reseñas repetida ignorada', { ticketId: ticket.id, requestedBy: interaction.user.id });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('ℹ️ Ya enviado', 'Las reseñas ya fueron solicitadas en este ticket.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   await markReviewRequested(ticket.id);
@@ -951,10 +1274,17 @@ async function handleRequestReviewsButton(interaction) {
     ownerMention: participants.owner?.toString?.() ?? null,
     partnerMention: participants.partner?.toString?.() ?? null,
   });
-  const mentionTargets = [participants.owner?.id, participants.partner?.id]
-    .filter(Boolean)
-    .map((id) => String(id));
-  await interaction.channel.send({ ...prompt, allowedMentions: { users: mentionTargets } });
+  const mentionTargets = normalizeSnowflakeArray(
+    [participants.owner?.id, participants.partner?.id],
+    { label: 'mención de reseña' }
+  );
+  logger.debug('Preparando solicitud de reseñas', {
+    ticketId: ticket.id,
+    requestedBy: interaction.user.id,
+    claimOwner: claim.middleman_user_id,
+    mentionTargets,
+  });
+  await interaction.channel.send({ ...prompt, allowedMentions: buildUserAllowedMentions(mentionTargets) });
   try {
     const disabledRow = requestReviewRow();
     disabledRow.components[0].setDisabled(true);
@@ -962,24 +1292,36 @@ async function handleRequestReviewsButton(interaction) {
   } catch (error) {
     logger.warn('No se pudo deshabilitar botón de reseñas', error);
   }
-  await interaction.reply({ ...buildTradeUpdateEmbed('✅ Solicitud enviada', 'Se invitó a los usuarios a dejar su reseña.'), ephemeral: true });
+  await interaction.reply({
+    ...buildTradeUpdateEmbed('✅ Solicitud enviada', 'Se invitó a los usuarios a dejar su reseña.'),
+    flags: MessageFlags.Ephemeral,
+  });
   logger.flow('Solicitadas reseñas para ticket', ticket.id, 'por', interaction.user.tag);
 }
 
 async function handleOpenReviewButton(interaction) {
   const ticket = await getTicketByChannel(interaction.channel.id);
   if (!ticket) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Ticket inválido', 'No se encontró información para este canal.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('❌ Ticket inválido', 'No se encontró información para este canal.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   const participants = await listParticipants(ticket.id);
   if (!participants.includes(String(interaction.user.id))) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('⛔ No participas en el trade', 'Solo los traders pueden dejar reseña.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('⛔ No participas en el trade', 'Solo los traders pueden dejar reseña.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   const already = await hasReviewFromUser(ticket.id, interaction.user.id);
   if (already) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('ℹ️ Ya registraste reseña', 'Solo puedes enviar una reseña por trade.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('ℹ️ Ya registraste reseña', 'Solo puedes enviar una reseña por trade.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   const modal = buildReviewModal();
@@ -989,23 +1331,35 @@ async function handleOpenReviewButton(interaction) {
 async function handleReviewModalSubmit(interaction) {
   const ticket = await getTicketByChannel(interaction.channel.id);
   if (!ticket) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Ticket inválido', 'No se encontró información para este canal.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('❌ Ticket inválido', 'No se encontró información para este canal.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   const claim = await getClaimByTicket(ticket.id);
   if (!claim) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Sin middleman', 'No se registró un middleman para este ticket.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('❌ Sin middleman', 'No se registró un middleman para este ticket.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   const participants = await listParticipants(ticket.id);
   if (!participants.includes(String(interaction.user.id))) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('⛔ No participas en el trade', 'Solo los traders pueden dejar reseña.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('⛔ No participas en el trade', 'Solo los traders pueden dejar reseña.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   const starsRaw = interaction.fields.getTextInputValue('stars');
   const stars = Number.parseInt(starsRaw, 10);
   if (!Number.isInteger(stars) || stars < 0 || stars > 5) {
-    await interaction.reply({ ...buildTradeUpdateEmbed('⚠️ Calificación inválida', 'Debes ingresar un número entero entre 0 y 5.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('⚠️ Calificación inválida', 'Debes ingresar un número entero entre 0 y 5.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
   const text = interaction.fields.getTextInputValue('review_text')?.slice(0, 400) ?? null;
@@ -1019,11 +1373,17 @@ async function handleReviewModalSubmit(interaction) {
     });
   } catch (error) {
     if (error instanceof DuplicateReviewError) {
-      await interaction.reply({ ...buildTradeUpdateEmbed('ℹ️ Ya registraste reseña', 'Solo puedes enviar una reseña por trade.'), ephemeral: true });
+      await interaction.reply({
+        ...buildTradeUpdateEmbed('ℹ️ Ya registraste reseña', 'Solo puedes enviar una reseña por trade.'),
+        flags: MessageFlags.Ephemeral,
+      });
       return;
     }
     logger.error('No se pudo registrar reseña', error);
-    await interaction.reply({ ...buildTradeUpdateEmbed('❌ Error', 'No se pudo guardar tu reseña. Intenta nuevamente más tarde.'), ephemeral: true });
+    await interaction.reply({
+      ...buildTradeUpdateEmbed('❌ Error', 'No se pudo guardar tu reseña. Intenta nuevamente más tarde.'),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
 
@@ -1051,14 +1411,21 @@ async function handleReviewModalSubmit(interaction) {
         });
         const files = [...reviewEmbed.files];
         if (card) files.push(card);
-        await reviewsChannel.send({ ...reviewEmbed, files, allowedMentions: { users: [interaction.user.id, claim.middleman_user_id] } });
+        await reviewsChannel.send({
+          ...reviewEmbed,
+          files,
+          allowedMentions: buildUserAllowedMentions([interaction.user.id, claim.middleman_user_id]),
+        });
       }
     } catch (error) {
       logger.warn('No se pudo publicar reseña en canal dedicado', error);
     }
   }
 
-  await interaction.reply({ ...buildTradeUpdateEmbed('✅ ¡Gracias por tu reseña!', 'Se registró tu opinión correctamente.'), ephemeral: true });
+  await interaction.reply({
+    ...buildTradeUpdateEmbed('✅ ¡Gracias por tu reseña!', 'Se registró tu opinión correctamente.'),
+    flags: MessageFlags.Ephemeral,
+  });
   logger.flow('Reseña registrada', interaction.user.tag, 'ticket', ticket.id, 'stars', stars);
 
   const reviewsCount = await countReviewsForTicket(ticket.id);

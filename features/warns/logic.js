@@ -1,4 +1,4 @@
-import { Collection } from 'discord.js';
+import { Collection, MessageFlags } from 'discord.js';
 import { WARN_THRESHOLDS } from '../../config/constants.js';
 import { addWarn, countWarns, listWarns, removeWarns } from '../../services/warns.repo.js';
 import { ensureUser } from '../../services/users.repo.js';
@@ -100,5 +100,5 @@ export async function removeWarn({ interaction, targetMember, amount }) {
 export async function showWarns({ interaction, targetMember }) {
   const warns = await listWarns(targetMember.id);
   const embed = buildWarnListEmbed({ target: targetMember, warns });
-  await interaction.reply({ ...embed, ephemeral: true });
+  await interaction.reply({ ...embed, flags: MessageFlags.Ephemeral });
 }

@@ -1,3 +1,4 @@
+import { MessageFlags } from 'discord.js';
 import { COMMAND_PREFIX } from '../../config/constants.js';
 import { guard } from '../../utils/guard.js';
 import { withBranding } from '../../utils/branding.js';
@@ -7,7 +8,12 @@ async function handleWarnSlash(interaction) {
   const target = interaction.options.getMember('usuario');
   const reason = interaction.options.getString('motivo', true);
   if (!target) {
-    await interaction.reply(withBranding({ title: '❌ Usuario no encontrado', description: 'No se encontró al usuario seleccionado.' }, { ephemeral: true }));
+    await interaction.reply(
+      withBranding(
+        { title: '❌ Usuario no encontrado', description: 'No se encontró al usuario seleccionado.' },
+        { flags: MessageFlags.Ephemeral }
+      )
+    );
     return;
   }
   await applyWarn({ interaction, targetMember: target, reason });
@@ -17,7 +23,12 @@ async function handleRemoveWarnSlash(interaction) {
   const target = interaction.options.getMember('usuario');
   const amount = interaction.options.getInteger('cantidad', true);
   if (!target) {
-    await interaction.reply(withBranding({ title: '❌ Usuario no encontrado', description: 'No se encontró al usuario seleccionado.' }, { ephemeral: true }));
+    await interaction.reply(
+      withBranding(
+        { title: '❌ Usuario no encontrado', description: 'No se encontró al usuario seleccionado.' },
+        { flags: MessageFlags.Ephemeral }
+      )
+    );
     return;
   }
   await removeWarn({ interaction, targetMember: target, amount });
@@ -26,7 +37,12 @@ async function handleRemoveWarnSlash(interaction) {
 async function handleWarnsSlash(interaction) {
   const target = interaction.options.getMember('usuario');
   if (!target) {
-    await interaction.reply(withBranding({ title: '❌ Usuario no encontrado', description: 'No se encontró al usuario seleccionado.' }, { ephemeral: true }));
+    await interaction.reply(
+      withBranding(
+        { title: '❌ Usuario no encontrado', description: 'No se encontró al usuario seleccionado.' },
+        { flags: MessageFlags.Ephemeral }
+      )
+    );
     return;
   }
   await showWarns({ interaction, targetMember: target });

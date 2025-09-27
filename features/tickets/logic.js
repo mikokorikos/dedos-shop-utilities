@@ -1,4 +1,4 @@
-import { ChannelType, PermissionFlagsBits } from 'discord.js';
+import { ChannelType, MessageFlags, PermissionFlagsBits } from 'discord.js';
 import { CONFIG } from '../../config/config.js';
 import { TICKET_TYPES } from '../../config/constants.js';
 import { countOpenTicketsByUser, createTicket, registerParticipant } from '../../services/tickets.repo.js';
@@ -26,17 +26,17 @@ function ticketName(type, member) {
 export async function handleTicketMenu(interaction) {
   const type = interaction.values?.[0];
   if (!type) {
-    await interaction.reply({ ...buildTicketErrorEmbed('No se reconoció el tipo de ticket.'), ephemeral: true });
+    await interaction.reply({ ...buildTicketErrorEmbed('No se reconoció el tipo de ticket.'), flags: MessageFlags.Ephemeral });
     return;
   }
   if (!Object.values(TICKET_TYPES).includes(type)) {
-    await interaction.reply({ ...buildTicketErrorEmbed('Tipo de ticket no permitido.'), ephemeral: true });
+    await interaction.reply({ ...buildTicketErrorEmbed('Tipo de ticket no permitido.'), flags: MessageFlags.Ephemeral });
     return;
   }
   await ensureUser(interaction.user.id);
   const open = await countOpenTicketsByUser(interaction.user.id, type);
   if (open >= CONFIG.TICKETS.MAX_PER_USER) {
-    await interaction.reply({ ...buildTicketLimitEmbed(CONFIG.TICKETS.MAX_PER_USER), ephemeral: true });
+    await interaction.reply({ ...buildTicketLimitEmbed(CONFIG.TICKETS.MAX_PER_USER), flags: MessageFlags.Ephemeral });
     return;
   }
   const { allowed, remainingMs } = checkCooldown(
@@ -45,7 +45,7 @@ export async function handleTicketMenu(interaction) {
     CONFIG.TICKETS.COOLDOWN_MS
   );
   if (!allowed) {
-    await interaction.reply({ ...buildTicketCooldownEmbed(remainingMs), ephemeral: true });
+    await interaction.reply({ ...buildTicketCooldownEmbed(remainingMs), flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -71,7 +71,7 @@ export async function handleTicketMenu(interaction) {
     });
   } catch (error) {
     logger.error('No se pudo crear canal de ticket', error);
-    await interaction.reply({ ...buildTicketErrorEmbed('No fue posible crear el canal. Intenta más tarde.'), ephemeral: true });
+    await interaction.reply({ ...buildTicketErrorEmbed('No fue posible crear el canal. Intenta más tarde.'), flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -91,6 +91,6 @@ export async function handleTicketMenu(interaction) {
     ...openedMessage,
   });
 
-  await interaction.reply({ ...buildTicketCreatedEmbed({ type, user: interaction.user, channel }), ephemeral: true });
+  await interaction.reply({ ...buildTicketCreatedEmbed({ type, user: interaction.user, channel }), flags: MessageFlags.Ephemeral });
   logger.flow('Ticket creado', type, 'por', interaction.user.id, 'canal', channel.id);
 }

@@ -1,3 +1,4 @@
+import { MessageFlags } from 'discord.js';
 import { dispatchFeatureInteraction } from '../features/index.js';
 import { withBranding } from '../utils/branding.js';
 import { logger } from '../utils/logger.js';
@@ -15,7 +16,10 @@ export function createInteractionHandler({ slashCommands }) {
         const handled = await dispatchFeatureInteraction(interaction);
         if (!handled && !interaction.replied) {
           await interaction.reply(
-            withBranding({ title: 'ℹ️ Acción no disponible', description: 'Esta interacción no está disponible por ahora.' }, { ephemeral: true })
+            withBranding(
+              { title: 'ℹ️ Acción no disponible', description: 'Esta interacción no está disponible por ahora.' },
+              { flags: MessageFlags.Ephemeral }
+            )
           );
         }
       }
@@ -24,7 +28,10 @@ export function createInteractionHandler({ slashCommands }) {
       if (!interaction.replied) {
         try {
           await interaction.reply(
-            withBranding({ title: '❌ Error', description: 'Ocurrió un problema al procesar la interacción.' }, { ephemeral: true })
+            withBranding(
+              { title: '❌ Error', description: 'Ocurrió un problema al procesar la interacción.' },
+              { flags: MessageFlags.Ephemeral }
+            )
           );
         } catch (err) {
           logger.warn('No se pudo responder al error de interacción', err);

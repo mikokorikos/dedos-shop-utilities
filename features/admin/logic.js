@@ -1,4 +1,5 @@
 import dayjs from 'dayjs';
+import { MessageFlags } from 'discord.js';
 import { ENTITY_CONFIG, DEFAULT_PAGE_SIZE, deleteRecord, isSupportedEntity, listRecords, searchRecords } from '../../services/admin.repo.js';
 import { parseUser } from '../../utils/helpers.js';
 import { logger } from '../../utils/logger.js';
@@ -17,18 +18,19 @@ function isSlashCommand(ctx) {
 }
 
 async function sendReply(ctx, payload, { ephemeral } = {}) {
-  const defaultEphemeral = isSlashCommand(ctx);
+  const shouldBeEphemeral = ephemeral ?? isSlashCommand(ctx);
+  const responsePayload = shouldBeEphemeral ? { ...payload, flags: MessageFlags.Ephemeral } : payload;
   if ('reply' in ctx && typeof ctx.reply === 'function') {
-    return ctx.reply({ ...payload, ephemeral: ephemeral ?? defaultEphemeral });
+    return ctx.reply(responsePayload);
   }
   if ('followUp' in ctx && typeof ctx.followUp === 'function') {
-    return ctx.followUp({ ...payload, ephemeral: ephemeral ?? defaultEphemeral });
+    return ctx.followUp(responsePayload);
   }
   if ('channel' in ctx && typeof ctx.channel?.send === 'function') {
     if (typeof ctx.reply === 'function') {
-      return ctx.reply(payload);
+      return ctx.reply(responsePayload);
     }
-    return ctx.channel.send(payload);
+    return ctx.channel.send(shouldBeEphemeral ? payload : responsePayload);
   }
   throw new Error('Contexto no soportado para respuesta');
 }
