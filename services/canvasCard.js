@@ -50,7 +50,12 @@ async function getRobloxInfo(userId) {
     throw new Error(`Roblox avatar fetch failed with status ${avatarRes.status}`);
   }
   const avatarData = await avatarRes.json();
-  const avatarUrl = avatarData?.data?.[0]?.imageUrl;
+  const avatarEntry = avatarData?.data?.[0];
+
+  let avatarUrl = avatarEntry?.imageUrl ?? null;
+  if (!avatarUrl || avatarEntry?.state === 'Pending') {
+    avatarUrl = `https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=352&height=352&format=png`;
+  }
   if (!avatarUrl) {
     throw new Error('No se pudo obtener el avatar de Roblox');
   }

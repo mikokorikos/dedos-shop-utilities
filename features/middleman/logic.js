@@ -973,10 +973,13 @@ async function finalizeTrade({ channel, ticket, forced = false, executorId = nul
   if (forced) {
     payload.embeds[0].addFields({ name: 'Estado del cierre', value: 'Forzado por el staff/middleman', inline: false });
   }
-  const allowedMentions = {
-    users: [claim.middleman_user_id, participants.owner?.id, participants.partner?.id]
+  const allowedMentionUsers = new Set(
+    [claim.middleman_user_id, participants.owner?.id, participants.partner?.id]
       .filter(Boolean)
-      .map((id) => String(id)),
+      .map((id) => String(id))
+  );
+  const allowedMentions = {
+    users: Array.from(allowedMentionUsers),
   };
   await channel.send({ ...payload, allowedMentions });
 
@@ -1120,9 +1123,13 @@ async function handleRequestReviewsButton(interaction) {
     ownerMention: participants.owner?.toString?.() ?? null,
     partnerMention: participants.partner?.toString?.() ?? null,
   });
-  const mentionTargets = [participants.owner?.id, participants.partner?.id]
-    .filter(Boolean)
-    .map((id) => String(id));
+  const mentionTargets = Array.from(
+    new Set(
+      [participants.owner?.id, participants.partner?.id]
+        .filter(Boolean)
+        .map((id) => String(id))
+    )
+  );
   logger.debug('Preparando solicitud de reseñas', {
     ticketId: ticket.id,
     requestedBy: interaction.user.id,
@@ -1226,7 +1233,10 @@ async function handleReviewModalSubmit(interaction) {
         });
         const files = [...reviewEmbed.files];
         if (card) files.push(card);
-        await reviewsChannel.send({ ...reviewEmbed, files, allowedMentions: { users: [interaction.user.id, claim.middleman_user_id] } });
+        const reviewMentions = Array.from(
+          new Set([interaction.user.id, claim.middleman_user_id].filter(Boolean).map((id) => String(id)))
+        );
+        await reviewsChannel.send({ ...reviewEmbed, files, allowedMentions: { users: reviewMentions } });
       }
     } catch (error) {
       logger.warn('No se pudo publicar reseña en canal dedicado', error);
