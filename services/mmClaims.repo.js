@@ -4,9 +4,11 @@ import { normalizeSnowflake } from '../utils/snowflake.js';
 export async function createClaim({ ticketId, middlemanUserId }) {
   const normalized = normalizeSnowflake(middlemanUserId, { label: 'middlemanUserId' });
   await pool.query(
-    `INSERT INTO mm_claims (ticket_id, middleman_user_id, panel_message_id, finalization_message_id)
+
+    `INSERT INTO mm_claims (ticket_id, middleman_id, panel_message_id, finalization_message_id)
      VALUES (?, ?, NULL, NULL)
-     ON DUPLICATE KEY UPDATE middleman_user_id = VALUES(middleman_user_id), claimed_at = CURRENT_TIMESTAMP`,
+     ON DUPLICATE KEY UPDATE middleman_id = VALUES(middleman_id), claimed_at = CURRENT_TIMESTAMP`,
+
     [ticketId, normalized]
   );
 }
@@ -15,7 +17,7 @@ export async function getClaimByTicket(ticketId) {
   const [rows] = await pool.query('SELECT * FROM mm_claims WHERE ticket_id = ? LIMIT 1', [ticketId]);
   const claim = rows[0] ?? null;
   if (claim) {
-    claim.middleman_user_id = normalizeSnowflake(claim.middleman_user_id, { label: 'middlemanUserId' });
+    claim.middleman_id = normalizeSnowflake(claim.middleman_id, { label: 'middlemanUserId' });
   }
   return claim;
 }

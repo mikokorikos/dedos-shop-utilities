@@ -234,8 +234,8 @@ function computeTradeState({ ticket, trades, claim, participants }) {
   } else if (claimStatus === 'unclaimed') {
     summary = 'Trade listo. Espera a que un middleman lo reclame.';
   } else if (claimStatus === 'claimed') {
-    summary = claim?.middleman_user_id
-      ? `Middleman atendiendo: <@${claim.middleman_user_id}>.`
+    summary = claim?.middleman_id
+      ? `Middleman atendiendo: <@${claim.middleman_id}>.`
       : 'Middleman atendiendo el trade.';
   } else if (claimStatus === 'closed') {
     summary = 'Trade finalizado.';
@@ -256,8 +256,8 @@ function computeTradeState({ ticket, trades, claim, participants }) {
 
   let claimStatusLabel = null;
   if (claimStatus === 'claimed') {
-    claimStatusLabel = claim?.middleman_user_id
-      ? `Reclamado por <@${claim.middleman_user_id}>`
+    claimStatusLabel = claim?.middleman_id
+      ? `Reclamado por <@${claim.middleman_id}>`
       : 'Reclamado por un middleman.';
   } else if (claimStatus === 'unclaimed') {
     claimStatusLabel = 'Aún no ha sido reclamado por un middleman.';
@@ -277,7 +277,7 @@ function computeTradeState({ ticket, trades, claim, participants }) {
     title,
     everyoneConfirmed,
     channelStatus,
-    middlemanId: claim?.middleman_user_id ?? null,
+    middlemanId: claim?.middleman_id ?? null,
   };
 }
 
@@ -444,7 +444,29 @@ export async function canExecuteMmCommand(member, ctx) {
   if (!claim) {
     return false;
   }
-  return String(claim.middleman_user_id) === String(member.id);
+  return String(claim.middleman_id) === String(member.id);
+}
+
+export async function canExecuteCloseCommand(member, ctx) {
+  if (userIsAdmin(member, CONFIG.ADMIN_ROLE_ID)) {
+    return true;
+  }
+  if (!member) {
+    return false;
+  }
+  const channelId = ctx.channelId ?? ctx.channel?.id ?? null;
+  if (!channelId) {
+    return false;
+  }
+  const ticket = await getTicketByChannel(channelId);
+  if (!ticket) {
+    return false;
+  }
+  const claim = await getClaimByTicket(ticket.id);
+  if (!claim || claim.closed_at) {
+    return false;
+  }
+  return String(claim.middleman_id) === String(member.id);
 }
 
 export async function canExecuteCloseCommand(member, ctx) {
@@ -770,7 +792,7 @@ async function handleMmList(ctx, { isSlash }) {
   const description = await Promise.all(
     rows.map(async (row, index) => {
       const avg = computeAverageFromRecord(row);
-      const tag = await resolveUserTag(ctx.client, row.discord_user_id);
+      const tag = await resolveUserTag(ctx.client, row.user_id);
       const ratingLabel = row.rating_count ? `${avg.toFixed(2)} ⭐ (${row.rating_count})` : 'Sin reseñas';
       return `${index + 1}. ${tag} — **${row.vouches_count}** vouches — ${ratingLabel}`;
     })
@@ -1166,9 +1188,9 @@ export async function handleTradeConfirm(interaction) {
     });
     const claim = await getClaimByTicket(ticket.id);
     if (claim && !claim.vouched) {
-      await incrementMiddlemanVouch(claim.middleman_user_id);
+      await incrementMiddlemanVouch(claim.middleman_id);
       await markClaimVouched(ticket.id);
-      logger.flow('Vouch sumado por confirmaciones completas', claim.middleman_user_id, 'ticket', ticket.id);
+      logger.flow('Vouch sumado por confirmaciones completas', claim.middleman_id, 'ticket', ticket.id);
     }
   }
 }
@@ -1221,7 +1243,7 @@ async function finalizeTrade({ channel, ticket, forced = false, executorId = nul
   const trades = await getTradesByTicket(ticket.id);
   const ownerTrade = trades.find((t) => String(t.user_id) === String(participants.owner.id));
   const partnerTrade = trades.find((t) => String(t.user_id) === String(participants.partner.id));
-  const middlemanTag = `<@${claim.middleman_user_id}>`;
+  const middlemanTag = `<@${claim.middleman_id}>`;
   const payload = buildTradeCompletedMessage({
     middlemanTag,
     userOne: {
@@ -1239,7 +1261,7 @@ async function finalizeTrade({ channel, ticket, forced = false, executorId = nul
     payload.embeds[0].addFields({ name: 'Estado del cierre', value: 'Forzado por el staff/middleman', inline: false });
   }
   const allowedMentionUsers = new Set(
-    [claim.middleman_user_id, participants.owner?.id, participants.partner?.id]
+    [claim.middleman_id, participants.owner?.id, participants.partner?.id]
       .filter(Boolean)
       .map((id) => String(id))
   );
@@ -1372,7 +1394,7 @@ async function handleClaimButton(interaction) {
     return;
   }
   const existing = await getClaimByTicket(ticket.id);
-  if (existing && String(existing.middleman_user_id) !== String(interaction.user.id)) {
+  if (existing && String(existing.middleman_id) !== String(interaction.user.id)) {
     await interaction.reply({ ...buildTradeUpdateEmbed('⏳ Ya reclamado', 'Otro middleman ya está atendiendo este ticket.'), ephemeral: true });
     return;
   }
@@ -1513,7 +1535,7 @@ async function handleReviewModalSubmit(interaction) {
     await createReview({
       ticketId: ticket.id,
       reviewerUserId: interaction.user.id,
-      middlemanUserId: claim.middleman_user_id,
+      middlemanUserId: claim.middleman_id,
       stars,
       reviewText: text,
     });
@@ -1527,8 +1549,10 @@ async function handleReviewModalSubmit(interaction) {
     return;
   }
 
-  await addMiddlemanRating(claim.middleman_user_id, stars);
-  const middleman = await getMiddlemanByDiscordId(claim.middleman_user_id);
+
+  await addMiddlemanRating(claim.middleman_id, stars);
+  const middleman = await getMiddlemanByDiscordId(claim.middleman_id);
+
   const participantsInfo = await fetchParticipants(interaction.guild, ticket);
   const card = await generateForRobloxUser({
     robloxUsername: middleman?.roblox_username,
@@ -1542,7 +1566,9 @@ async function handleReviewModalSubmit(interaction) {
   });
   const reviews = await getReviewsForTicket(ticket.id);
   const panelPayload = buildTicketClaimedMessage({
-    mmTag: `<@${claim.middleman_user_id}>`,
+
+    mmTag: `<@${claim.middleman_id}>`,
+
     robloxUsername: middleman?.roblox_username ?? 'Desconocido',
     vouches: middleman?.vouches_count ?? 0,
     avgStars: computeAverageFromRecord(middleman),
@@ -1563,7 +1589,8 @@ async function handleReviewModalSubmit(interaction) {
       const newMessage = await interaction.channel.send({
         ...panelPayload,
         files: panelFiles,
-        allowedMentions: { users: [claim.middleman_user_id] },
+        allowedMentions: { users: [claim.middleman_id] },
+
       });
       await setClaimPanelMessageId(ticket.id, newMessage.id);
     } catch (error) {
@@ -1580,14 +1607,16 @@ async function handleReviewModalSubmit(interaction) {
           reviewerTag: interaction.user.toString(),
           stars,
           text,
-          mmTag: `<@${claim.middleman_user_id}>`,
+
+          mmTag: `<@${claim.middleman_id}>`,
+
           ownerTag: participantsInfo.owner?.toString?.() ?? 'Usuario 1',
           partnerTag: participantsInfo.partner?.toString?.() ?? 'Usuario 2',
         });
         const files = [...reviewEmbed.files];
         if (card) files.push(card);
         const reviewMentions = Array.from(
-          new Set([interaction.user.id, claim.middleman_user_id].filter(Boolean).map((id) => String(id)))
+          new Set([interaction.user.id, claim.middleman_id].filter(Boolean).map((id) => String(id)))
         );
         await reviewsChannel.send({ ...reviewEmbed, files, allowedMentions: { users: reviewMentions } });
         logger.flow('Reseña publicada en canal configurado', {
@@ -1609,9 +1638,11 @@ async function handleReviewModalSubmit(interaction) {
   if (reviewsCount >= uniqueParticipants.size) {
     const claimAfter = await getClaimByTicket(ticket.id);
     if (claimAfter && !claimAfter.vouched) {
-      await incrementMiddlemanVouch(claimAfter.middleman_user_id);
+      await incrementMiddlemanVouch(claimAfter.middleman_id);
       await markClaimVouched(ticket.id);
-      logger.flow('Vouch sumado por reseñas completas', claimAfter.middleman_user_id, 'ticket', ticket.id);
+
+      logger.flow('Vouch sumado por reseñas completas', claimAfter.middleman_id, 'ticket', ticket.id);
+
     }
     logger.info('Todas las reseñas registradas para ticket', ticket.id);
   }

@@ -1,12 +1,15 @@
 import { pool } from './db.js';
 import { normalizeSnowflake } from '../utils/snowflake.js';
+import { getWarnSeverityIdByName, getWarnSeverityNameById } from './catalogs.repo.js';
 
 export async function addWarn({ userId, moderatorId, reason, severity }) {
   const user = normalizeSnowflake(userId, { label: 'warnUserId' });
-  const moderator = moderatorId == null ? null : normalizeSnowflake(moderatorId, { label: 'moderatorId', allowEmpty: true });
+  const moderator =
+    moderatorId == null ? null : normalizeSnowflake(moderatorId, { label: 'moderatorId', allowEmpty: true });
+  const severityId = await getWarnSeverityIdByName(severity ?? 'minor');
   const [result] = await pool.query(
-    'INSERT INTO warns (user_id, moderator_id, reason, severity) VALUES (?, ?, ?, ?)',
-    [user, moderator, reason, severity ?? 'minor']
+    'INSERT INTO warns (user_id, moderator_id, reason, severity_id) VALUES (?, ?, ?, ?)',
+    [user, moderator, reason, severityId]
   );
   return result.insertId;
 }
@@ -32,12 +35,16 @@ export async function countWarns(userId) {
 export async function listWarns(userId) {
   const user = normalizeSnowflake(userId, { label: 'warnUserId' });
   const [rows] = await pool.query('SELECT * FROM warns WHERE user_id = ? ORDER BY created_at DESC', [user]);
-  return rows.map((row) => ({
-    ...row,
-    user_id: normalizeSnowflake(row.user_id, { label: 'warnUserId' }),
-    moderator_id:
-      row.moderator_id == null
-        ? null
-        : normalizeSnowflake(row.moderator_id, { label: 'moderatorId', allowEmpty: true }),
-  }));
+  const mapped = await Promise.all(
+    rows.map(async (row) => ({
+      ...row,
+      severity: await getWarnSeverityNameById(row.severity_id),
+      user_id: normalizeSnowflake(row.user_id, { label: 'warnUserId' }),
+      moderator_id:
+        row.moderator_id == null
+          ? null
+          : normalizeSnowflake(row.moderator_id, { label: 'moderatorId', allowEmpty: true }),
+    }))
+  );
+  return mapped;
 }
