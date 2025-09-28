@@ -305,6 +305,7 @@ async function renderCard({ username, avatarUrl, fallbackAvatarUrl, rating, rati
         avatarImg = null;
       } else {
         logger.warn('Fallo al cargar avatar de Roblox, reintentando', logPayload);
+
       }
     }
   }
