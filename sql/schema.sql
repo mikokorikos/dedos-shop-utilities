@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS mm_trade_finalizations (
   CONSTRAINT fk_mtf_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+
 CREATE TABLE IF NOT EXISTS member_trade_stats (
   discord_user_id VARCHAR(20) PRIMARY KEY,
   roblox_username VARCHAR(255) NULL,

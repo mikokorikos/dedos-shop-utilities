@@ -70,6 +70,7 @@ import {
   hasReviewFromUser,
 } from '../../services/mmReviews.repo.js';
 import { listFinalizations, resetFinalizations, setFinalizationConfirmed } from '../../services/mmFinalizations.repo.js';
+
 import { incrementMemberTrade } from '../../services/memberStats.repo.js';
 import { checkCooldown } from '../../utils/cooldowns.js';
 import { parseUser } from '../../utils/helpers.js';
@@ -78,6 +79,7 @@ import { logger } from '../../utils/logger.js';
 import { generateForRobloxUser } from '../../services/canvasCard.js';
 import { userIsAdmin } from '../../utils/permissions.js';
 import { getRuntimeConfig } from '../../config/runtimeConfig.js';
+
 import { sendCommandReply } from '../../utils/respond.js';
 
 const tradePanelMessages = new Map();
@@ -1277,6 +1279,7 @@ async function finalizeTrade({ channel, ticket, forced = false, executorId = nul
   await markClaimClosed(ticket.id, { forced });
   await setTicketStatus(ticket.id, 'CLOSED');
   const { ownerId, partnerId } = resolveParticipantIds(ticket, participants);
+
   const statsUpdates = [];
   if (ownerId) {
     statsUpdates.push(
@@ -1319,6 +1322,7 @@ async function finalizeTrade({ channel, ticket, forced = false, executorId = nul
   if (statsUpdates.length) {
     await Promise.all(statsUpdates);
   }
+
   const participantsToLock = [ownerId, partnerId].filter(Boolean);
   if (participantsToLock.length) {
     await Promise.all(participantsToLock.map((id) => updateSendPermission(channel, id, false)));
@@ -1547,6 +1551,7 @@ async function handleReviewModalSubmit(interaction) {
   const panelFiles = [...panelPayload.files];
   if (card) panelFiles.push(card);
   if (claim.panel_message_id) {
+
     try {
       const panelMessage = await interaction.channel.messages.fetch(claim.panel_message_id);
       await panelMessage.edit({ ...panelPayload, files: panelFiles, allowedMentions: { parse: [] } });

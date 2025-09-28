@@ -239,6 +239,7 @@ function resolveRatingLabel(rating, ratingCount) {
   return `Calificación: ${rating.toFixed(2)}`;
 }
 
+
 async function renderCard({
   username,
   avatarUrl,
@@ -252,6 +253,7 @@ async function renderCard({
   roleLabel = null,
 }) {
   const normalizedVariant = variant === 'member' ? 'member' : 'middleman';
+
   const canvas = createCanvas(CANVAS_W * SCALE, CANVAS_H * SCALE);
   const ctx = canvas.getContext('2d');
   ctx.scale(SCALE, SCALE);
@@ -317,6 +319,7 @@ async function renderCard({
         avatarImg = null;
       } else {
         logger.warn('Fallo al cargar avatar de Roblox, reintentando', logPayload);
+
       }
     }
   }
