@@ -715,18 +715,84 @@ export async function handleMiddlemanMenu(interaction) {
   }
 }
 
-function resolvePartnerMember(guild, input) {
+async function resolvePartnerMember(guild, rawInput) {
+  const input = rawInput?.trim();
+  if (!input) {
+    logger.warn('resolvePartnerMember: input vacío', { guildId: guild.id, rawInput });
+    return null;
+  }
+
   const parsedId = parseUser(input);
   if (parsedId) {
+    logger.debug('resolvePartnerMember: buscando por ID', { guildId: guild.id, parsedId });
     if (guild.members.cache.has(parsedId)) {
+      logger.debug('resolvePartnerMember: encontrado en cache', { guildId: guild.id, parsedId });
       return guild.members.cache.get(parsedId);
     }
-    return guild.members.fetch(parsedId).catch(() => null);
+    try {
+      const fetched = await guild.members.fetch(parsedId);
+      logger.debug('resolvePartnerMember: encontrado vía fetch por ID', { guildId: guild.id, parsedId });
+      return fetched;
+    } catch (error) {
+      logger.warn('resolvePartnerMember: no se pudo obtener miembro por ID', {
+        guildId: guild.id,
+        parsedId,
+        reason: error.message,
+      });
+      return null;
+    }
   }
+
   const normalized = input.toLowerCase();
-  return guild.members.cache.find(
-    (member) => member.user.username.toLowerCase() === normalized || member.displayName?.toLowerCase() === normalized
-  );
+  logger.debug('resolvePartnerMember: buscando por nombre', { guildId: guild.id, normalized });
+  const cached = guild.members.cache.find((member) => {
+    const username = member.user.username?.toLowerCase();
+    const displayName = member.displayName?.toLowerCase();
+    return username === normalized || displayName === normalized;
+  });
+  if (cached) {
+    logger.debug('resolvePartnerMember: encontrado en cache por nombre', {
+      guildId: guild.id,
+      normalized,
+      memberId: cached.id,
+    });
+    return cached;
+  }
+
+  if (normalized.length < 2) {
+    logger.warn('resolvePartnerMember: búsqueda remota omitida por input corto', {
+      guildId: guild.id,
+      normalized,
+    });
+    return null;
+  }
+
+  try {
+    const fetched = await guild.members.fetch({ query: normalized, limit: 10 });
+    const match = fetched.find((member) => {
+      const username = member.user.username?.toLowerCase();
+      const globalName = member.user.globalName?.toLowerCase();
+      const displayName = member.displayName?.toLowerCase();
+      return username === normalized || displayName === normalized || globalName === normalized;
+    });
+    if (match) {
+      logger.debug('resolvePartnerMember: encontrado vía fetch por nombre', {
+        guildId: guild.id,
+        normalized,
+        memberId: match.id,
+      });
+      return match;
+    }
+    logger.warn('resolvePartnerMember: sin coincidencias tras búsqueda remota', { guildId: guild.id, normalized });
+  } catch (error) {
+    logger.error('resolvePartnerMember: error al buscar miembro por nombre', {
+      guildId: guild.id,
+      normalized,
+      reason: error.message,
+    });
+  }
+
+  return null;
 }
 
 async function createMiddlemanChannel({ interaction, partnerMember, context }) {
@@ -737,6 +803,13 @@ async function createMiddlemanChannel({ interaction, partnerMember, context }) {
   const channelName = `${baseName}-${partnerPart}`.slice(0, 90);
 
   const parent = CONFIG.MIDDLEMAN.CATEGORY_ID ?? interaction.channel?.parentId ?? null;
+  logger.debug('createMiddlemanChannel: preparando canal', {
+    guildId: guild.id,
+    ownerId: ownerMember.id,
+    partnerId: partnerMember.id,
+    parent,
+    channelName,
+  });
   const overwrites = [
     { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
     {
@@ -763,6 +836,12 @@ async function createMiddlemanChannel({ interaction, partnerMember, context }) {
     parent,
     permissionOverwrites: overwrites,
   });
+  logger.info('createMiddlemanChannel: canal creado', {
+    guildId: guild.id,
+    channelId: channel.id,
+    ownerId: ownerMember.id,
+    partnerId: partnerMember.id,
+  });
 
   try {
     await ensureUser(ownerMember.id);
@@ -782,6 +861,12 @@ async function createMiddlemanChannel({ interaction, partnerMember, context }) {
     });
     await ensurePanelMessage(channel, { owner: ownerMember, partner: partnerMember });
 
+    logger.info('createMiddlemanChannel: configurado correctamente', {
+      guildId: guild.id,
+      channelId: channel.id,
+      ticketId,
+    });
+
     return { channel, ticketId };
   } catch (error) {
     logger.error('Fallo configurando canal middleman recién creado', error);
@@ -795,9 +880,19 @@ async function createMiddlemanChannel({ interaction, partnerMember, context }) {
 export async function handleMiddlemanModal(interaction) {
   const partnerInput = interaction.fields.getTextInputValue('partner');
   const context = interaction.fields.getTextInputValue('context');
+  logger.debug('handleMiddlemanModal: recibido', {
+    guildId: interaction.guild?.id,
+    userId: interaction.user?.id,
+    partnerInput,
+  });
   await interaction.deferReply({ ephemeral: true });
   const partnerMember = await resolvePartnerMember(interaction.guild, partnerInput);
   if (!partnerMember) {
+    logger.warn('handleMiddlemanModal: partner no encontrado', {
+      guildId: interaction.guild?.id,
+      userId: interaction.user?.id,
+      partnerInput,
+    });
     const errorEmbed = buildTradeUpdateEmbed('❌ No encontramos al partner', 'Verifica que esté en el servidor e intenta de nuevo.');
     await interaction.editReply({ ...errorEmbed });
     return;
@@ -821,6 +916,7 @@ export async function handleMiddlemanModal(interaction) {
   }
   const confirmation = buildTradeUpdateEmbed('✅ Middleman creado', `Se creó el canal ${channel} y se notificó a tu partner.`);
   await interaction.editReply({ ...confirmation, allowedMentions: { users: [partnerMember.id] } });
+  logger.flow('handleMiddlemanModal: middleman creado', interaction.user.id, '->', partnerMember.id, 'canal', channel.id);
   logger.flow('Middleman creado', interaction.user.id, '->', partnerMember.id, 'canal', channel.id);
 }
 
