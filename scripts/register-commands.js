@@ -36,11 +36,17 @@ const commandBuilders = [
       sub
         .setName('stats')
         .setDescription('Ver estadísticas de un middleman')
-        .addUserOption((option) => option.setName('usuario').setDescription('Usuario a consultar').setRequired(true))
+        .addUserOption((option) => option.setName('usuario').setDescription('Usuario a consultar').setRequired(false))
     )
     .addSubcommand((sub) => sub.setName('list').setDescription('Listar top middlemans por vouches'))
     .addSubcommand((sub) => sub.setName('closeforce').setDescription('Cerrar trade sin esperar reseñas (solo reclamante/admin)')),
   new SlashCommandBuilder()
+
+    .setName('mmstats')
+    .setDescription('Consultar estadísticas de un middleman')
+    .addUserOption((option) => option.setName('usuario').setDescription('Middleman a consultar').setRequired(false)),
+  new SlashCommandBuilder()
+
     .setName('close')
     .setDescription('Iniciar el cierre del trade actual (solo middleman asignado)'),
   new SlashCommandBuilder()
@@ -60,6 +66,16 @@ const commandBuilders = [
         )
     ),
   new SlashCommandBuilder()
+
+    .setName('stats')
+    .setDescription('Ver estadísticas de trade de un miembro')
+    .addUserOption((option) => option.setName('usuario').setDescription('Usuario a consultar').setRequired(false)),
+  new SlashCommandBuilder()
+    .setName('ststs')
+    .setDescription('Alias para estadísticas de miembros')
+    .addUserOption((option) => option.setName('usuario').setDescription('Usuario a consultar').setRequired(false)),
+  new SlashCommandBuilder()
+
     .setName('warn')
     .setDescription('Aplicar warn a un usuario (solo admin)')
     .addUserOption((option) => option.setName('usuario').setDescription('Usuario a advertir').setRequired(true))

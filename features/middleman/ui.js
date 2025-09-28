@@ -325,6 +325,26 @@ export function buildTicketClaimedMessage({ mmTag, robloxUsername, vouches, avgS
   return { embeds: [embed], files: [createDedosAttachment()], components: [] };
 }
 
+export function buildMiddlemanStatsMessage({ mmTag, robloxUsername, vouches, avgStars, reviewsCount }) {
+  const safeAvg = Number.isFinite(avgStars) ? avgStars : 0;
+  const lines = [
+    `Middleman: ${mmTag}`,
+    `Roblox: \`${robloxUsername ?? 'Sin registro'}\``,
+    `Vouches acumulados: **${vouches ?? 0}**`,
+  ];
+  if (reviewsCount) {
+    lines.push(`Promedio histórico: **${safeAvg.toFixed(2)}** (${reviewsCount} reseña${reviewsCount === 1 ? '' : 's'})`);
+  } else {
+    lines.push('Promedio histórico: Sin reseñas registradas.');
+  }
+  const embed = applyDedosBrand(
+    new EmbedBuilder()
+      .setTitle('📊 Estadísticas del middleman')
+      .setDescription(lines.join('\n'))
+  );
+  return { embeds: [embed], files: [createDedosAttachment()], components: [] };
+}
+
 export function buildRequestReviewsMessage({ mmTag, ownerMention, partnerMention }) {
   const reminders = [
     'Cada trader puede enviar **una sola reseña** con calificación de 1 a 5 estrellas.',

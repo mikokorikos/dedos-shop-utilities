@@ -12,6 +12,7 @@ import {
   buildHelpEmbed,
   buildMiddlemanInfo,
   buildMiddlemanPanel,
+  buildMiddlemanStatsMessage,
   buildPartnerModal,
   buildFinalizationPrompt,
   buildRequestReviewsMessage,
@@ -69,6 +70,8 @@ import {
   hasReviewFromUser,
 } from '../../services/mmReviews.repo.js';
 import { listFinalizations, resetFinalizations, setFinalizationConfirmed } from '../../services/mmFinalizations.repo.js';
+
+import { incrementMemberTrade } from '../../services/memberStats.repo.js';
 import { checkCooldown } from '../../utils/cooldowns.js';
 import { parseUser } from '../../utils/helpers.js';
 import { assertRobloxUser } from '../../utils/roblox.js';
@@ -76,6 +79,8 @@ import { logger } from '../../utils/logger.js';
 import { generateForRobloxUser } from '../../services/canvasCard.js';
 import { userIsAdmin } from '../../utils/permissions.js';
 import { getRuntimeConfig } from '../../config/runtimeConfig.js';
+
+import { sendCommandReply } from '../../utils/respond.js';
 
 const tradePanelMessages = new Map();
 const finalizationMessages = new Map();
@@ -136,19 +141,6 @@ async function fetchParticipants(guild, ticket) {
           })),
     participantIds,
   };
-}
-
-async function sendCommandReply(ctx, payload, { ephemeral = false } = {}) {
-  if ('reply' in ctx && typeof ctx.reply === 'function') {
-    return ctx.reply({ ...payload, ephemeral });
-  }
-  if ('followUp' in ctx && typeof ctx.followUp === 'function') {
-    return ctx.followUp({ ...payload, ephemeral });
-  }
-  if ('channel' in ctx && typeof ctx.channel?.send === 'function') {
-    return ctx.channel.send(payload);
-  }
-  throw new Error('No se pudo responder al comando middleman');
 }
 
 function computeAverageFromRecord(record) {
@@ -431,6 +423,9 @@ export async function canExecuteMmCommand(member, ctx) {
     return true;
   }
   const subcommand = resolveMmSubcommand(ctx);
+  if (subcommand === 'stats') {
+    return true;
+  }
   if (subcommand !== 'closeforce') {
     return false;
   }
@@ -554,6 +549,7 @@ function buildMmUsageEmbed() {
       '`/mm stats @usuario`',
       '`/mm list`',
       '`/mm closeforce` (solo middleman reclamante o admin)',
+      '`/mmstats @usuario?` (acceso público)',
     ].join('\n')
   );
 }
@@ -586,6 +582,31 @@ export async function handleMmCommand(ctx) {
   }
 }
 
+export async function handleStandaloneMmStatsCommand(ctx) {
+  const isSlash = 'isChatInputCommand' in ctx && typeof ctx.isChatInputCommand === 'function' && ctx.isChatInputCommand();
+  let targetId = null;
+  if (isSlash) {
+    const option =
+      ctx.options.getUser?.('usuario') ??
+      ctx.options.getUser?.('user') ??
+      ctx.options.getUser?.('target');
+    targetId = option?.id ?? ctx.user?.id ?? null;
+  } else {
+    const content = ctx.content ?? '';
+    const [, maybeTarget] = content.trim().split(/\s+/, 2);
+    targetId = parseUser(maybeTarget) ?? ctx.author?.id ?? null;
+  }
+  if (!targetId) {
+    const usage = buildTradeUpdateEmbed(
+      '⚠️ Faltan argumentos',
+      'Menciona qué middleman quieres consultar o ejecútalo sin argumentos para ver tus propios datos.'
+    );
+    await sendCommandReply(ctx, usage, { ephemeral: isSlash });
+    return;
+  }
+  await respondMmStats(ctx, targetId, { isSlash });
+}
+
 async function resolveUserTag(client, userId) {
   if (!userId) return 'Usuario desconocido';
   try {
@@ -594,6 +615,47 @@ async function resolveUserTag(client, userId) {
   } catch (error) {
     return `<@${userId}>`;
   }
+}
+
+async function respondMmStats(ctx, targetUserId, { isSlash }) {
+  const mm = await getMiddlemanByDiscordId(targetUserId);
+  if (!mm) {
+    const embed = buildTradeUpdateEmbed('❌ Middleman no registrado', 'No se encontraron datos para este usuario.');
+    await sendCommandReply(ctx, embed, { ephemeral: isSlash });
+    return;
+  }
+  const avg = computeAverageFromRecord(mm);
+  const tag = await resolveUserTag(ctx.client, targetUserId);
+  const payload = buildMiddlemanStatsMessage({
+    mmTag: tag,
+    robloxUsername: mm.roblox_username,
+    vouches: mm.vouches_count,
+    avgStars: avg,
+    reviewsCount: mm.rating_count,
+  });
+  const files = [...payload.files];
+  const card = await generateForRobloxUser({
+    robloxUsername: mm.roblox_username,
+    robloxUserId: mm.roblox_user_id,
+    rating: avg,
+    ratingCount: mm.rating_count,
+    vouches: mm.vouches_count,
+  }).catch((error) => {
+    logger.warn('No se pudo generar tarjeta de middleman para stats', {
+      userId: targetUserId,
+      reason: error?.message ?? error,
+    });
+    return null;
+  });
+  if (card) {
+    files.push(card);
+  }
+  const allowedMentions = { users: [String(targetUserId)] };
+  await sendCommandReply(
+    ctx,
+    { ...payload, files, allowedMentions },
+    { ephemeral: false }
+  );
 }
 
 async function handleMmAdd(ctx, args, { isSlash }) {
@@ -686,30 +748,16 @@ async function handleMmSet(ctx, args, { isSlash }) {
 }
 
 async function handleMmStats(ctx, args, { isSlash }) {
-  const { userId } = args;
-  if (!userId) {
-    const usage = buildTradeUpdateEmbed('⚠️ Faltan argumentos', 'Indica qué middleman quieres consultar.');
+  const targetId = args.userId ?? ctx.user?.id ?? ctx.author?.id ?? null;
+  if (!targetId) {
+    const usage = buildTradeUpdateEmbed(
+      '⚠️ Faltan argumentos',
+      'Indica qué middleman quieres consultar o déjalo vacío para verte a ti mismo.'
+    );
     await sendCommandReply(ctx, usage, { ephemeral: isSlash });
     return;
   }
-  const mm = await getMiddlemanByDiscordId(userId);
-  if (!mm) {
-    const embed = buildTradeUpdateEmbed('❌ Middleman no registrado', 'No se encontraron datos para este usuario.');
-    await sendCommandReply(ctx, embed, { ephemeral: isSlash });
-    return;
-  }
-  const avg = computeAverageFromRecord(mm);
-  const tag = await resolveUserTag(ctx.client, userId);
-  const embed = buildTradeUpdateEmbed(
-    '📊 Estadísticas de middleman',
-    [
-      `Usuario: ${tag}`,
-      `Roblox: **${mm.roblox_username}**${mm.roblox_user_id ? ` (${mm.roblox_user_id})` : ''}`,
-      `Vouches: **${mm.vouches_count}**`,
-      `Promedio de estrellas: **${mm.rating_count ? avg.toFixed(2) : 'N/A'}** (${mm.rating_count} reseña${mm.rating_count === 1 ? '' : 's'})`,
-    ].join('\n')
-  );
-  await sendCommandReply(ctx, embed, { ephemeral: isSlash });
+  await respondMmStats(ctx, targetId, { isSlash });
 }
 
 async function handleMmList(ctx, { isSlash }) {
@@ -1231,6 +1279,50 @@ async function finalizeTrade({ channel, ticket, forced = false, executorId = nul
   await markClaimClosed(ticket.id, { forced });
   await setTicketStatus(ticket.id, 'CLOSED');
   const { ownerId, partnerId } = resolveParticipantIds(ticket, participants);
+
+  const statsUpdates = [];
+  if (ownerId) {
+    statsUpdates.push(
+      incrementMemberTrade({
+        discordUserId: ownerId,
+        robloxUsername: ownerTrade?.roblox_username ?? null,
+        robloxUserId: ownerTrade?.roblox_user_id ?? null,
+        partnerRobloxUsername: partnerTrade?.roblox_username ?? null,
+        partnerRobloxUserId: partnerTrade?.roblox_user_id ?? null,
+      })
+        .then(() => logger.flow('Trade contabilizado para miembro', ownerId, 'ticket', ticket.id))
+        .catch((error) =>
+          logger.warn('No se pudo actualizar stats de miembro', {
+            ticketId: ticket.id,
+            userId: ownerId,
+            reason: error?.message ?? error,
+          })
+        )
+    );
+  }
+  if (partnerId) {
+    statsUpdates.push(
+      incrementMemberTrade({
+        discordUserId: partnerId,
+        robloxUsername: partnerTrade?.roblox_username ?? null,
+        robloxUserId: partnerTrade?.roblox_user_id ?? null,
+        partnerRobloxUsername: ownerTrade?.roblox_username ?? null,
+        partnerRobloxUserId: ownerTrade?.roblox_user_id ?? null,
+      })
+        .then(() => logger.flow('Trade contabilizado para miembro', partnerId, 'ticket', ticket.id))
+        .catch((error) =>
+          logger.warn('No se pudo actualizar stats de miembro', {
+            ticketId: ticket.id,
+            userId: partnerId,
+            reason: error?.message ?? error,
+          })
+        )
+    );
+  }
+  if (statsUpdates.length) {
+    await Promise.all(statsUpdates);
+  }
+
   const participantsToLock = [ownerId, partnerId].filter(Boolean);
   if (participantsToLock.length) {
     await Promise.all(participantsToLock.map((id) => updateSendPermission(channel, id, false)));
@@ -1459,6 +1551,7 @@ async function handleReviewModalSubmit(interaction) {
   const panelFiles = [...panelPayload.files];
   if (card) panelFiles.push(card);
   if (claim.panel_message_id) {
+
     try {
       const panelMessage = await interaction.channel.messages.fetch(claim.panel_message_id);
       await panelMessage.edit({ ...panelPayload, files: panelFiles, allowedMentions: { parse: [] } });
@@ -1497,6 +1590,11 @@ async function handleReviewModalSubmit(interaction) {
           new Set([interaction.user.id, claim.middleman_user_id].filter(Boolean).map((id) => String(id)))
         );
         await reviewsChannel.send({ ...reviewEmbed, files, allowedMentions: { users: reviewMentions } });
+        logger.flow('Reseña publicada en canal configurado', {
+          ticketId: ticket.id,
+          reviewerId: interaction.user.id,
+          channelId: reviewsChannel.id,
+        });
       }
     } catch (error) {
       logger.warn('No se pudo publicar reseña en canal dedicado', error);

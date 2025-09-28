@@ -108,3 +108,16 @@ CREATE TABLE IF NOT EXISTS mm_trade_finalizations (
   CONSTRAINT fk_mtf_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
   CONSTRAINT fk_mtf_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
+
+
+CREATE TABLE IF NOT EXISTS member_trade_stats (
+  discord_user_id VARCHAR(20) PRIMARY KEY,
+  roblox_username VARCHAR(255) NULL,
+  roblox_user_id BIGINT NULL,
+  partner_roblox_username VARCHAR(255) NULL,
+  partner_roblox_user_id BIGINT NULL,
+  trades_completed INT NOT NULL DEFAULT 0,
+  last_trade_at TIMESTAMP NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_member_trades_count (trades_completed DESC)
+) ENGINE=InnoDB;
