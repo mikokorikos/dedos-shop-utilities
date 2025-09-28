@@ -1,5 +1,7 @@
+import { Buffer } from 'node:buffer';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { AttachmentBuilder } from 'discord.js';
+import { logger } from '../utils/logger.js';
 
 const CANVAS_W = 1000;
 const CANVAS_H = 260;
@@ -8,7 +10,26 @@ const SCALE = 2;
 const fetchImpl =
   globalThis.fetch ?? ((...args) => import('node-fetch').then(({ default: f }) => f(...args)));
 
+const ROBLOX_IMAGE_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (compatible; DedosShopBot/1.0; +https://discord.gg/dedos)',
+  Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+};
+
 const profileCache = new Map();
+
+async function fetchImageAsBuffer(url) {
+  const response = await fetchImpl(url, { headers: ROBLOX_IMAGE_HEADERS });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} al descargar imagen`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+async function loadRobloxImage(source) {
+  const imageBuffer = await fetchImageAsBuffer(source);
+  return loadImage(imageBuffer);
+}
 
 async function getUserIdFromUsername(username) {
   const cacheKey = `username:${username.toLowerCase()}`;
@@ -272,11 +293,20 @@ async function renderCard({ username, avatarUrl, fallbackAvatarUrl, rating, rati
     const source = attemptedSources[i];
     try {
       // eslint-disable-next-line no-await-in-loop
-      avatarImg = await loadImage(source);
+
+      avatarImg = await loadRobloxImage(source);
+      if (i > 0) {
+        logger.info('Avatar de Roblox cargado utilizando URL alternativa', { source });
+      }
       break;
     } catch (error) {
+      const logPayload = { source, error: error?.message ?? error };
       if (i === attemptedSources.length - 1) {
+        logger.error('No se pudo cargar avatar de Roblox, se usará placeholder', logPayload);
         avatarImg = null;
+      } else {
+        logger.warn('Fallo al cargar avatar de Roblox, reintentando', logPayload);
+
       }
     }
   }
