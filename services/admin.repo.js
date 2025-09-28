@@ -14,27 +14,35 @@ export const ENTITY_CONFIG = {
   middlemen: {
     table: 'middlemen',
     label: 'Middlemans',
-    idColumn: 'discord_user_id',
+    idColumn: 'user_id',
     orderBy: 'updated_at DESC',
     select:
-      'discord_user_id, roblox_username, roblox_user_id, vouches_count, rating_sum, rating_count, created_at, updated_at',
-    searchColumns: ['discord_user_id', 'roblox_username', 'roblox_user_id'],
+      `user_id, roblox_username, roblox_user_id, created_at, updated_at,
+       (SELECT COUNT(*) FROM mm_claims c WHERE c.middleman_id = middlemen.user_id AND c.vouched = 1) AS vouches_count,
+       (SELECT COALESCE(SUM(r.stars), 0) FROM mm_reviews r WHERE r.middleman_id = middlemen.user_id) AS rating_sum,
+       (SELECT COUNT(*) FROM mm_reviews r WHERE r.middleman_id = middlemen.user_id) AS rating_count`,
+    searchColumns: ['user_id', 'roblox_username', 'roblox_user_id'],
   },
   warns: {
     table: 'warns',
     label: 'Warns',
     idColumn: 'id',
     orderBy: 'created_at DESC',
-    select: 'id, user_id, moderator_id, severity, reason, created_at',
-    searchColumns: ['id', 'user_id', 'moderator_id', 'reason', 'severity'],
+    select:
+      `id, user_id, moderator_id, severity_id, reason, created_at,
+       (SELECT name FROM warn_severities ws WHERE ws.id = warns.severity_id) AS severity_name`,
+    searchColumns: ['id', 'user_id', 'moderator_id', 'reason', 'severity_id'],
   },
   tickets: {
     table: 'tickets',
     label: 'Tickets',
     idColumn: 'id',
     orderBy: 'created_at DESC',
-    select: 'id, owner_id, guild_id, channel_id, type, status, created_at, closed_at',
-    searchColumns: ['id', 'owner_id', 'channel_id', 'type', 'status'],
+    select:
+      `id, owner_id, guild_id, channel_id, type_id, status_id, created_at, closed_at,
+       (SELECT name FROM ticket_types tt WHERE tt.id = tickets.type_id) AS type,
+       (SELECT name FROM ticket_statuses ts WHERE ts.id = tickets.status_id) AS status`,
+    searchColumns: ['id', 'owner_id', 'channel_id', 'type_id', 'status_id'],
   },
 };
 

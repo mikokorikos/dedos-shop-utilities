@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { ChannelType, REST, Routes, SlashCommandBuilder } from 'discord.js';
 
 const ENTITY_CHOICES = [
   { name: 'Usuarios', value: 'users' },
@@ -36,10 +36,41 @@ const commandBuilders = [
       sub
         .setName('stats')
         .setDescription('Ver estadísticas de un middleman')
-        .addUserOption((option) => option.setName('usuario').setDescription('Usuario a consultar').setRequired(true))
+        .addUserOption((option) => option.setName('usuario').setDescription('Usuario a consultar').setRequired(false))
     )
     .addSubcommand((sub) => sub.setName('list').setDescription('Listar top middlemans por vouches'))
     .addSubcommand((sub) => sub.setName('closeforce').setDescription('Cerrar trade sin esperar reseñas (solo reclamante/admin)')),
+  new SlashCommandBuilder()
+    .setName('mmstats')
+    .setDescription('Consultar estadísticas de un middleman')
+    .addUserOption((option) => option.setName('usuario').setDescription('Middleman a consultar').setRequired(false)),
+  new SlashCommandBuilder()
+    .setName('close')
+    .setDescription('Iniciar el cierre del trade actual (solo middleman asignado)'),
+  new SlashCommandBuilder()
+    .setName('config')
+    .setDescription('Administrar configuración del bot (solo admin)')
+    .addSubcommand((sub) => sub.setName('get').setDescription('Mostrar configuración activa'))
+    .addSubcommand((sub) =>
+      sub
+        .setName('set')
+        .setDescription('Actualizar valores configurables')
+        .addChannelOption((option) =>
+          option
+            .setName('reviews_channel')
+            .setDescription('Canal donde se publicarán las reseñas del middleman')
+            .addChannelTypes(ChannelType.GuildText)
+            .setRequired(false)
+        )
+    ),
+  new SlashCommandBuilder()
+    .setName('stats')
+    .setDescription('Ver estadísticas de trade de un miembro')
+    .addUserOption((option) => option.setName('usuario').setDescription('Usuario a consultar').setRequired(false)),
+  new SlashCommandBuilder()
+    .setName('ststs')
+    .setDescription('Alias para estadísticas de miembros')
+    .addUserOption((option) => option.setName('usuario').setDescription('Usuario a consultar').setRequired(false)),
   new SlashCommandBuilder()
     .setName('warn')
     .setDescription('Aplicar warn a un usuario (solo admin)')

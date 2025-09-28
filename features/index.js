@@ -1,10 +1,12 @@
 import { adminFeature } from './admin/index.js';
+import { configFeature } from './config/index.js';
 import { middlemanFeature } from './middleman/index.js';
+import { memberStatsFeature } from './memberStats/index.js';
 import { ticketsFeature } from './tickets/index.js';
 import { warnsFeature } from './warns/index.js';
 import { logger } from '../utils/logger.js';
 
-export const FEATURES = [adminFeature, middlemanFeature, ticketsFeature, warnsFeature];
+export const FEATURES = [adminFeature, configFeature, middlemanFeature, memberStatsFeature, ticketsFeature, warnsFeature];
 
 function registerCommand(map, command, type) {
   if (map.has(command.name)) {

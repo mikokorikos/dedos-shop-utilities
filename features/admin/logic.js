@@ -51,12 +51,12 @@ const ENTITY_FORMATTERS = {
     const ratingCount = Number(row.rating_count ?? 0);
     const ratingSum = Number(row.rating_sum ?? 0);
     const ratingLabel = ratingCount > 0 ? `${(ratingSum / ratingCount).toFixed(2)}⭐ (${ratingCount})` : 'Sin reseñas';
-    return `• <@${row.discord_user_id}> — Roblox: ${row.roblox_username ?? 'N/A'} — Vouches: ${row.vouches_count ?? 0} — Rating: ${ratingLabel}`;
+    return `• <@${row.user_id}> — Roblox: ${row.roblox_username ?? 'N/A'} — Vouches: ${row.vouches_count ?? 0} — Rating: ${ratingLabel}`;
   },
   warns: (row) => {
     const moderator = row.moderator_id ? `<@${row.moderator_id}>` : 'N/A';
     const reason = truncate(row.reason ?? 'Sin motivo');
-    return `• #${row.id} — Usuario: <@${row.user_id}> — Severidad: ${row.severity ?? 'sin dato'} — Moderador: ${moderator} — ${formatDate(row.created_at)} — Motivo: ${reason}`;
+    return `• #${row.id} — Usuario: <@${row.user_id}> — Severidad: ${row.severity_name ?? 'sin dato'} — Moderador: ${moderator} — ${formatDate(row.created_at)} — Motivo: ${reason}`;
   },
   tickets: (row) => {
     const closed = row.closed_at ? ` — Cerrado: ${formatDate(row.closed_at)}` : '';

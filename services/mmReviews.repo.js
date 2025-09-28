@@ -13,7 +13,7 @@ export async function createReview({ ticketId, reviewerUserId, middlemanUserId, 
   const middleman = normalizeSnowflake(middlemanUserId, { label: 'middlemanUserId' });
   try {
     const [result] = await pool.query(
-      'INSERT INTO mm_reviews (ticket_id, reviewer_user_id, middleman_user_id, stars, review_text) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO mm_reviews (ticket_id, reviewer_id, middleman_id, stars, review_text) VALUES (?, ?, ?, ?, ?)',
       [ticketId, reviewer, middleman, stars, reviewText ?? null]
     );
     return result.insertId;
