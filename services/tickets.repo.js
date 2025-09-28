@@ -1,29 +1,36 @@
 import { pool } from './db.js';
 import { normalizeSnowflake, normalizeSnowflakeArray } from '../utils/snowflake.js';
 
-export async function createTicket({ guildId, channelId, ownerId, type, status = 'open' }) {
+export async function createTicket({ guildId, channelId, ownerId, type, status = 'OPEN' }) {
   const normalizedGuild = normalizeSnowflake(guildId, { label: 'guildId' });
   const normalizedChannel = normalizeSnowflake(channelId, { label: 'channelId' });
   const normalizedOwner = normalizeSnowflake(ownerId, { label: 'ownerId' });
+  const nextStatus = normalizeStatus(status);
   const [result] = await pool.query(
     'INSERT INTO tickets (guild_id, channel_id, owner_id, type, status) VALUES (?, ?, ?, ?, ?)',
-    [normalizedGuild, normalizedChannel, normalizedOwner, type, status]
+    [normalizedGuild, normalizedChannel, normalizedOwner, type, nextStatus]
   );
   return result.insertId;
 }
 
+function normalizeStatus(status) {
+  const allowed = new Set(['OPEN', 'CONFIRMED', 'CLAIMED', 'CLOSED']);
+  const value = typeof status === 'string' ? status.toUpperCase() : 'OPEN';
+  return allowed.has(value) ? value : 'OPEN';
+}
+
 export async function setTicketStatus(ticketId, status) {
-  await pool.query('UPDATE tickets SET status = ?, closed_at = CASE WHEN ? = "closed" THEN CURRENT_TIMESTAMP ELSE closed_at END WHERE id = ?', [
-    status,
-    status,
-    ticketId,
-  ]);
+  const nextStatus = normalizeStatus(status);
+  await pool.query(
+    'UPDATE tickets SET status = ?, closed_at = CASE WHEN ? = "CLOSED" THEN CURRENT_TIMESTAMP ELSE closed_at END WHERE id = ?',
+    [nextStatus, nextStatus, ticketId]
+  );
 }
 
 export async function countOpenTicketsByUser(userId, type) {
   const normalizedUser = normalizeSnowflake(userId, { label: 'ownerId' });
   const [rows] = await pool.query(
-    'SELECT COUNT(*) as total FROM tickets WHERE owner_id = ? AND status = "open" AND type = ?',
+    'SELECT COUNT(*) as total FROM tickets WHERE owner_id = ? AND UPPER(status) = "OPEN" AND type = ?',
     [normalizedUser, type]
   );
   return rows[0]?.total ?? 0;

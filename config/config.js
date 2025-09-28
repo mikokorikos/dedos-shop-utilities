@@ -33,7 +33,6 @@ export const CONFIG = {
   GUILD_ID: process.env.GUILD_ID ?? null,
   ADMIN_ROLE_ID: process.env.ADMIN_ROLE_ID,
   MM_ROLE_ID: process.env.MM_ROLE_ID,
-  REVIEWS_CHANNEL_ID: process.env.REVIEWS_CHANNEL_ID ?? null,
   TRADE_LOGS_CHANNEL_ID: process.env.TRADE_LOGS_CHANNEL_ID ?? null,
   LOG_LEVEL: process.env.LOG_LEVEL ?? 'info',
   LOG_FILE_PATH: process.env.LOG_FILE_PATH ?? 'dedosbot.log',

@@ -28,7 +28,7 @@ index.js            # Bootstrap del bot
 ## ⚙️ Puesta en marcha
 
 1. **Clona** el repositorio y duplica `.env.example` a `.env`.
-2. **Completa** las variables: token de Discord, IDs de roles, configuración MySQL, ruta de `dedosgif.gif` (opcional `DEDOS_GIF`).
+2. **Completa** las variables: token de Discord, IDs de roles, configuración MySQL, ruta de `dedosgif.gif` (opcional `DEDOS_GIF`). Las configuraciones dinámicas (como el canal de reseñas) viven en `config/runtime.json` y se administran con el comando `/config`.
 3. **Instala dependencias**:
 
    ```bash
@@ -82,7 +82,7 @@ Los usuarios que no tengan el rol configurado reciben un embed con el gif y el m
 6. Cuando ambos confirman, el canal se bloquea, los botones se desactivan y se notifica al rol `MM_ROLE_ID` con el embed **“🔒 Trade listo para middleman”**, además de publicar el botón **“Reclamar Middleman”**.
 7. Un middleman registrado puede reclamar el ticket (se verifica rol/DB), se genera una tarjeta visual con `@napi-rs/canvas` y se registra la relación en `mm_claims`.
 8. El middleman obtiene un botón **“Solicitar reseñas”** para lanzar el flujo de calificación. El bot pingea a los traders con un embed y el botón **“Dejar reseña”** (modal con estrellas 0-5 + comentario opcional).
-9. Cada reseña se guarda en `mm_reviews`, se publica automáticamente en el canal configurado (`REVIEWS_CHANNEL_ID`) con la tarjeta del middleman y se recalcula el promedio de estrellas. Cuando todos los traders reseñan se suma un `vouch` y se envía el embed **“TRADE COMPLETADO”** con un resumen de lo entregado por cada parte.
+9. Cada reseña se guarda en `mm_reviews`, se publica automáticamente en el canal configurado en `config/runtime.json` (comando `/config set reviewsChannel`) con la tarjeta del middleman y se recalcula el promedio de estrellas. Cuando todos los traders reseñan se suma un `vouch` y se envía el embed **“TRADE COMPLETADO”** con un resumen de lo entregado por cada parte.
 10. Si los traders confirmaron pero no dejan reseña, el middleman o un admin pueden ejecutar `/mm closeforce` para cerrar el trade igualmente (se publica el embed final y se deja log `[WARN]`).
 
 ### Errores y avisos esperados en middleman

@@ -293,7 +293,6 @@ async function renderCard({ username, avatarUrl, fallbackAvatarUrl, rating, rati
     const source = attemptedSources[i];
     try {
       // eslint-disable-next-line no-await-in-loop
-
       avatarImg = await loadRobloxImage(source);
       if (i > 0) {
         logger.info('Avatar de Roblox cargado utilizando URL alternativa', { source });

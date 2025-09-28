@@ -300,62 +300,50 @@ export function claimRow() {
   );
 }
 
-export function buildReviewPromptForMiddleman(mmTag) {
-  const embed = applyDedosBrand(
-    new EmbedBuilder()
-      .setTitle('📝 Solicitar reseñas')
-      .setDescription(
-        [
-          `${mmTag}, cuando finalices el trade usa el botón para solicitar reseñas a los traders.`,
-          'Esto enviará un mensaje para que califiquen tu servicio.',
-        ].join('\n')
-      )
-  );
-  return { embeds: [embed], files: [createDedosAttachment()], components: [requestReviewRow()] };
-}
-
-export function requestReviewRow() {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(INTERACTION_IDS.MIDDLEMAN_BUTTON_REQUEST_REVIEW)
-      .setLabel('Solicitar reseñas')
-      .setEmoji('📝')
-      .setStyle(ButtonStyle.Secondary)
-  );
-}
-
-export function buildTicketClaimedMessage({ mmTag, robloxUsername, vouches, avgStars }) {
+export function buildTicketClaimedMessage({ mmTag, robloxUsername, vouches, avgStars, reviews = [] }) {
   const stars = Number.isFinite(avgStars) ? avgStars : 0;
+  const reviewLines = reviews.length
+    ? reviews.map((review) => {
+        const prefix = `⭐ ${review.stars}/5 — ${review.reviewer}`;
+        const text = review.text ? `\n${review.text}` : '';
+        return `${prefix}${text}`.slice(0, 256);
+      })
+    : ['Aún no se registran reseñas para este trade.'];
   const embed = applyDedosBrand(
     new EmbedBuilder()
-      .setTitle('🟦 TICKET RECLAMADO')
+      .setTitle('🛡️ Middleman asignado')
       .setDescription(
         [
           `Te atiende **${mmTag}**`,
           `**Roblox:** \`${robloxUsername}\``,
-          `**Vouches:** ${vouches}`,
-          `**⭐ Promedio:** ${stars > 0 ? stars.toFixed(2) : 'N/A'}`,
+          `**Vouches acumulados:** ${vouches}`,
+          `**⭐ Promedio histórico:** ${stars > 0 ? stars.toFixed(2) : 'N/A'}`,
         ].join('\n')
       )
+      .addFields({ name: 'Reseñas de este trade', value: reviewLines.join('\n\n') })
   );
   return { embeds: [embed], files: [createDedosAttachment()], components: [] };
 }
 
 export function buildRequestReviewsMessage({ mmTag, ownerMention, partnerMention }) {
-  const lines = [
-    '¡Trade finalizado! Por favor, deja tu reseña para calificar la experiencia con el middleman.',
-    'Haz clic en **Dejar reseña** y completa la información. Puedes dejar un comentario opcional.',
+  const reminders = [
+    'Cada trader puede enviar **una sola reseña** con calificación de 1 a 5 estrellas.',
+    'Describe brevemente tu experiencia para ayudar a futuros usuarios.',
   ];
   const mentions = [ownerMention, partnerMention].filter(Boolean);
+  const description = [
+    'Gracias por completar el trade. Es momento de calificar al middleman que te atendió.',
+    ...reminders,
+  ];
   if (mentions.length) {
-    lines.unshift(mentions.join(' '));
+    description.unshift(mentions.join(' '));
   }
   const embed = applyDedosBrand(
     new EmbedBuilder()
-      .setTitle('⭐ Comparte tu experiencia')
-      .setDescription(lines.join('\n'))
-      .setFooter({ text: 'Tu opinión ayuda a la comunidad a mantenerse segura.' })
-      .setAuthor({ name: `${mmTag} solicita tu reseña` })
+      .setTitle('⭐ Reseñas del trade')
+      .setDescription(description.join('\n'))
+      .setAuthor({ name: `Atendido por ${mmTag}` })
+      .setFooter({ text: 'Las reseñas se publicarán en el canal configurado.' })
   );
   return { embeds: [embed], files: [createDedosAttachment()], components: [buildReviewButtonRow()] };
 }
@@ -368,6 +356,39 @@ export function buildReviewButtonRow() {
       .setEmoji('⭐')
       .setStyle(ButtonStyle.Primary)
   );
+}
+
+export function buildFinalizationPrompt({ owner, partner, confirmedIds, completed = false }) {
+  const ownerConfirmed = confirmedIds.has(String(owner?.id ?? ''));
+  const partnerConfirmed = confirmedIds.has(String(partner?.id ?? ''));
+  const statusLabel = completed
+    ? 'El trade ha sido confirmado por ambas partes. El canal quedó bloqueado.'
+    : 'Cada trader debe confirmar que recibió lo acordado para cerrar el trade.';
+  const embed = applyDedosBrand(
+    new EmbedBuilder()
+      .setTitle('¿Terminar trade?')
+      .setDescription(statusLabel)
+      .addFields(
+        {
+          name: owner?.displayName || owner?.user?.username || 'Trader 1',
+          value: ownerConfirmed ? '✅ Confirmado' : '⌛ Pendiente',
+          inline: true,
+        },
+        {
+          name: partner?.displayName || partner?.user?.username || 'Trader 2',
+          value: partnerConfirmed ? '✅ Confirmado' : '⌛ Pendiente',
+          inline: true,
+        }
+      )
+  );
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(INTERACTION_IDS.MIDDLEMAN_BUTTON_FINAL_CONFIRM)
+      .setLabel('Confirmar trade')
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(completed)
+  );
+  return { embeds: [embed], files: [createDedosAttachment()], components: [row] };
 }
 
 export function buildReviewModal() {
@@ -397,14 +418,18 @@ export function buildReviewModal() {
     );
 }
 
-export function buildReviewPublishedEmbed({ reviewerTag, stars, text, mmTag }) {
+export function buildReviewPublishedEmbed({ reviewerTag, stars, text, mmTag, ownerTag, partnerTag }) {
+  const safeText = text?.trim()?.length ? text.trim() : 'Sin comentarios adicionales.';
+  const starsVisual = `${'⭐'.repeat(stars)}${'☆'.repeat(Math.max(0, 5 - stars))} (${stars}/5)`;
   const embed = applyDedosBrand(
     new EmbedBuilder()
-      .setTitle(`⭐ Nueva reseña para ${mmTag}`)
-      .setDescription(text?.trim()?.length ? text.trim() : 'Sin comentarios adicionales.')
+      .setTitle('⭐ Nueva reseña registrada')
       .addFields(
-        { name: 'Calificación', value: `${'⭐'.repeat(stars)}${'☆'.repeat(5 - stars)} (${stars}/5)`, inline: true },
-        { name: 'Usuario', value: reviewerTag, inline: true }
+        { name: 'Tradeo con', value: `${ownerTag} ↔ ${partnerTag}`, inline: false },
+        { name: 'Atendido por', value: mmTag, inline: false },
+        { name: 'Usuario', value: reviewerTag, inline: true },
+        { name: 'Calificación', value: starsVisual, inline: true },
+        { name: 'Reseña', value: safeText, inline: false }
       )
   );
   return { embeds: [embed], files: [createDedosAttachment()], components: [] };
