@@ -530,14 +530,18 @@ export async function handleMiddlemanMenu(interaction) {
 }
 
 function resolvePartnerMember(guild, input) {
-  const parsedId = parseUser(input);
+  const sanitized = input?.trim();
+  if (!sanitized) {
+    return null;
+  }
+  const parsedId = parseUser(sanitized);
   if (parsedId) {
     if (guild.members.cache.has(parsedId)) {
       return guild.members.cache.get(parsedId);
     }
     return guild.members.fetch(parsedId).catch(() => null);
   }
-  const normalized = input.toLowerCase();
+  const normalized = sanitized.toLowerCase();
   return guild.members.cache.find(
     (member) => member.user.username.toLowerCase() === normalized || member.displayName?.toLowerCase() === normalized
   );
