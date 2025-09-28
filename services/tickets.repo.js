@@ -6,21 +6,31 @@ export async function createTicket({ guildId, channelId, ownerId, type, status =
   const normalizedGuild = normalizeSnowflake(guildId, { label: 'guildId' });
   const normalizedChannel = normalizeSnowflake(channelId, { label: 'channelId' });
   const normalizedOwner = normalizeSnowflake(ownerId, { label: 'ownerId' });
+
   const typeId = await getTicketTypeIdByName(type ?? 'mm');
   const statusId = await getTicketStatusIdByName(status ?? 'OPEN');
   const [result] = await pool.query(
     'INSERT INTO tickets (guild_id, channel_id, owner_id, type_id, status_id) VALUES (?, ?, ?, ?, ?)',
     [normalizedGuild, normalizedChannel, normalizedOwner, typeId, statusId]
+
   );
   return result.insertId;
 }
 
+function normalizeStatus(status) {
+  const allowed = new Set(['OPEN', 'CONFIRMED', 'CLAIMED', 'CLOSED']);
+  const value = typeof status === 'string' ? status.toUpperCase() : 'OPEN';
+  return allowed.has(value) ? value : 'OPEN';
+}
+
 export async function setTicketStatus(ticketId, status) {
+
   const statusId = await getTicketStatusIdByName(status ?? 'OPEN');
   const statusName = await getTicketStatusNameById(statusId);
   await pool.query(
     'UPDATE tickets SET status_id = ?, closed_at = CASE WHEN ? = "CLOSED" THEN CURRENT_TIMESTAMP ELSE closed_at END WHERE id = ?',
     [statusId, statusName, ticketId]
+
   );
 }
 
@@ -29,8 +39,10 @@ export async function countOpenTicketsByUser(userId, type) {
   const typeId = await getTicketTypeIdByName(type ?? 'mm');
   const openStatusId = await getTicketStatusIdByName('OPEN');
   const [rows] = await pool.query(
+
     'SELECT COUNT(*) as total FROM tickets WHERE owner_id = ? AND status_id = ? AND type_id = ?',
     [normalizedUser, openStatusId, typeId]
+
   );
   return rows[0]?.total ?? 0;
 }

@@ -76,6 +76,7 @@ CREATE TABLE tickets (
   owner_id BIGINT UNSIGNED NOT NULL,
   type_id TINYINT UNSIGNED NOT NULL,
   status_id TINYINT UNSIGNED NOT NULL DEFAULT 1, -- OPEN
+
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   closed_at TIMESTAMP NULL,
   INDEX idx_tickets_owner_status (owner_id, status_id),
@@ -152,9 +153,11 @@ CREATE TABLE mm_claims (
   closed_at TIMESTAMP NULL,
   vouched TINYINT(1) NOT NULL DEFAULT 0,
   forced_close TINYINT(1) NOT NULL DEFAULT 0,
+
   panel_message_id BIGINT UNSIGNED NULL,
   finalization_message_id BIGINT UNSIGNED NULL,
   INDEX idx_claims_mm (middleman_id, claimed_at DESC),
+
   CONSTRAINT fk_claim_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
   CONSTRAINT fk_claim_middleman FOREIGN KEY (middleman_id) REFERENCES middlemen(user_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
@@ -193,4 +196,26 @@ CREATE TABLE member_trade_stats (
   last_trade_at TIMESTAMP NULL,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_mts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS mm_trade_finalizations (
+  ticket_id INT NOT NULL,
+  user_id VARCHAR(20) NOT NULL,
+  confirmed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (ticket_id, user_id),
+  CONSTRAINT fk_mtf_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+  CONSTRAINT fk_mtf_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+
+CREATE TABLE IF NOT EXISTS member_trade_stats (
+  discord_user_id VARCHAR(20) PRIMARY KEY,
+  roblox_username VARCHAR(255) NULL,
+  roblox_user_id BIGINT NULL,
+  partner_roblox_username VARCHAR(255) NULL,
+  partner_roblox_user_id BIGINT NULL,
+  trades_completed INT NOT NULL DEFAULT 0,
+  last_trade_at TIMESTAMP NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_member_trades_count (trades_completed DESC)
 ) ENGINE=InnoDB;

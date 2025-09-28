@@ -70,6 +70,7 @@ import {
   hasReviewFromUser,
 } from '../../services/mmReviews.repo.js';
 import { listFinalizations, resetFinalizations, setFinalizationConfirmed } from '../../services/mmFinalizations.repo.js';
+
 import { incrementMemberTrade } from '../../services/memberStats.repo.js';
 import { checkCooldown } from '../../utils/cooldowns.js';
 import { parseUser } from '../../utils/helpers.js';
@@ -78,6 +79,7 @@ import { logger } from '../../utils/logger.js';
 import { generateForRobloxUser } from '../../services/canvasCard.js';
 import { userIsAdmin } from '../../utils/permissions.js';
 import { getRuntimeConfig } from '../../config/runtimeConfig.js';
+
 import { sendCommandReply } from '../../utils/respond.js';
 
 const tradePanelMessages = new Map();
@@ -465,6 +467,28 @@ export async function canExecuteCloseCommand(member, ctx) {
     return false;
   }
   return String(claim.middleman_id) === String(member.id);
+}
+
+export async function canExecuteCloseCommand(member, ctx) {
+  if (userIsAdmin(member, CONFIG.ADMIN_ROLE_ID)) {
+    return true;
+  }
+  if (!member) {
+    return false;
+  }
+  const channelId = ctx.channelId ?? ctx.channel?.id ?? null;
+  if (!channelId) {
+    return false;
+  }
+  const ticket = await getTicketByChannel(channelId);
+  if (!ticket) {
+    return false;
+  }
+  const claim = await getClaimByTicket(ticket.id);
+  if (!claim || claim.closed_at) {
+    return false;
+  }
+  return String(claim.middleman_user_id) === String(member.id);
 }
 
 async function ensurePanelMessage(channel, { owner, partner, disabled } = {}) {
@@ -1277,6 +1301,7 @@ async function finalizeTrade({ channel, ticket, forced = false, executorId = nul
   await markClaimClosed(ticket.id, { forced });
   await setTicketStatus(ticket.id, 'CLOSED');
   const { ownerId, partnerId } = resolveParticipantIds(ticket, participants);
+
   const statsUpdates = [];
   if (ownerId) {
     statsUpdates.push(
@@ -1319,6 +1344,7 @@ async function finalizeTrade({ channel, ticket, forced = false, executorId = nul
   if (statsUpdates.length) {
     await Promise.all(statsUpdates);
   }
+
   const participantsToLock = [ownerId, partnerId].filter(Boolean);
   if (participantsToLock.length) {
     await Promise.all(participantsToLock.map((id) => updateSendPermission(channel, id, false)));
@@ -1523,8 +1549,10 @@ async function handleReviewModalSubmit(interaction) {
     return;
   }
 
+
   await addMiddlemanRating(claim.middleman_id, stars);
   const middleman = await getMiddlemanByDiscordId(claim.middleman_id);
+
   const participantsInfo = await fetchParticipants(interaction.guild, ticket);
   const card = await generateForRobloxUser({
     robloxUsername: middleman?.roblox_username,
@@ -1538,7 +1566,9 @@ async function handleReviewModalSubmit(interaction) {
   });
   const reviews = await getReviewsForTicket(ticket.id);
   const panelPayload = buildTicketClaimedMessage({
+
     mmTag: `<@${claim.middleman_id}>`,
+
     robloxUsername: middleman?.roblox_username ?? 'Desconocido',
     vouches: middleman?.vouches_count ?? 0,
     avgStars: computeAverageFromRecord(middleman),
@@ -1547,6 +1577,7 @@ async function handleReviewModalSubmit(interaction) {
   const panelFiles = [...panelPayload.files];
   if (card) panelFiles.push(card);
   if (claim.panel_message_id) {
+
     try {
       const panelMessage = await interaction.channel.messages.fetch(claim.panel_message_id);
       await panelMessage.edit({ ...panelPayload, files: panelFiles, allowedMentions: { parse: [] } });
@@ -1559,6 +1590,7 @@ async function handleReviewModalSubmit(interaction) {
         ...panelPayload,
         files: panelFiles,
         allowedMentions: { users: [claim.middleman_id] },
+
       });
       await setClaimPanelMessageId(ticket.id, newMessage.id);
     } catch (error) {
@@ -1575,7 +1607,9 @@ async function handleReviewModalSubmit(interaction) {
           reviewerTag: interaction.user.toString(),
           stars,
           text,
+
           mmTag: `<@${claim.middleman_id}>`,
+
           ownerTag: participantsInfo.owner?.toString?.() ?? 'Usuario 1',
           partnerTag: participantsInfo.partner?.toString?.() ?? 'Usuario 2',
         });
@@ -1606,7 +1640,9 @@ async function handleReviewModalSubmit(interaction) {
     if (claimAfter && !claimAfter.vouched) {
       await incrementMiddlemanVouch(claimAfter.middleman_id);
       await markClaimVouched(ticket.id);
+
       logger.flow('Vouch sumado por reseñas completas', claimAfter.middleman_id, 'ticket', ticket.id);
+
     }
     logger.info('Todas las reseñas registradas para ticket', ticket.id);
   }

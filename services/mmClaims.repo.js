@@ -4,9 +4,11 @@ import { normalizeSnowflake } from '../utils/snowflake.js';
 export async function createClaim({ ticketId, middlemanUserId }) {
   const normalized = normalizeSnowflake(middlemanUserId, { label: 'middlemanUserId' });
   await pool.query(
+
     `INSERT INTO mm_claims (ticket_id, middleman_id, panel_message_id, finalization_message_id)
      VALUES (?, ?, NULL, NULL)
      ON DUPLICATE KEY UPDATE middleman_id = VALUES(middleman_id), claimed_at = CURRENT_TIMESTAMP`,
+
     [ticketId, normalized]
   );
 }

@@ -35,12 +35,14 @@ const BASE_DDL = [
     CONSTRAINT fk_warns_sev FOREIGN KEY (severity_id) REFERENCES warn_severities(id)
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS tickets (
+
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     guild_id BIGINT UNSIGNED NOT NULL,
     channel_id BIGINT UNSIGNED NOT NULL,
     owner_id BIGINT UNSIGNED NOT NULL,
     type_id TINYINT UNSIGNED NOT NULL,
     status_id TINYINT UNSIGNED NOT NULL DEFAULT 1,
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     closed_at TIMESTAMP NULL,
     INDEX idx_tickets_owner_status (owner_id, status_id),
@@ -114,6 +116,7 @@ const BASE_DDL = [
     closed_at TIMESTAMP NULL,
     vouched TINYINT(1) NOT NULL DEFAULT 0,
     forced_close TINYINT(1) NOT NULL DEFAULT 0,
+
     panel_message_id BIGINT UNSIGNED NULL,
     finalization_message_id BIGINT UNSIGNED NULL,
     INDEX idx_claims_mm (middleman_id, claimed_at DESC),
@@ -123,11 +126,13 @@ const BASE_DDL = [
   `CREATE TABLE IF NOT EXISTS mm_trade_finalizations (
     ticket_id INT UNSIGNED NOT NULL,
     user_id BIGINT UNSIGNED NOT NULL,
+
     confirmed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(ticket_id, user_id),
     CONSTRAINT fk_mtf_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
     CONSTRAINT fk_mtf_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`,
+
   `CREATE TABLE IF NOT EXISTS member_trade_stats (
     user_id BIGINT UNSIGNED PRIMARY KEY,
     trades_completed INT NOT NULL DEFAULT 0,
@@ -135,6 +140,7 @@ const BASE_DDL = [
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_mts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
+
 ];
 
 async function columnExists(table, column) {

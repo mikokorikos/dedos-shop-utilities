@@ -11,6 +11,7 @@ export async function incrementMemberTrade({
   const normalized = normalizeSnowflake(discordUserId, { label: 'discordUserId' });
   await pool.query(
     `INSERT INTO member_trade_stats (
+
        user_id,
        trades_completed,
        last_trade_at
@@ -24,10 +25,12 @@ export async function incrementMemberTrade({
   if (robloxUserId) {
     await pool.query('UPDATE users SET roblox_id = ? WHERE id = ?', [robloxUserId, normalized]);
   }
+
 }
 
 export async function getMemberStats(discordUserId) {
   const normalized = normalizeSnowflake(discordUserId, { label: 'discordUserId' });
+
   const [rows] = await pool.query(
     `SELECT mts.user_id, mts.trades_completed, mts.last_trade_at, mts.updated_at, u.roblox_id
        FROM member_trade_stats mts
@@ -58,5 +61,6 @@ export async function getMemberStats(discordUserId) {
     roblox_user_id: trade?.roblox_user_id ?? record.roblox_id ?? null,
     partner_roblox_username: trade?.partner_username ?? null,
     partner_roblox_user_id: trade?.partner_user_id ?? null,
+
   };
 }
