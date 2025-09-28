@@ -1,5 +1,7 @@
+import { Buffer } from 'node:buffer';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { AttachmentBuilder } from 'discord.js';
+import { logger } from '../utils/logger.js';
 
 const CANVAS_W = 1000;
 const CANVAS_H = 260;
@@ -8,7 +10,26 @@ const SCALE = 2;
 const fetchImpl =
   globalThis.fetch ?? ((...args) => import('node-fetch').then(({ default: f }) => f(...args)));
 
+const ROBLOX_IMAGE_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (compatible; DedosShopBot/1.0; +https://discord.gg/dedos)',
+  Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+};
+
 const profileCache = new Map();
+
+async function fetchImageAsBuffer(url) {
+  const response = await fetchImpl(url, { headers: ROBLOX_IMAGE_HEADERS });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} al descargar imagen`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+async function loadRobloxImage(source) {
+  const imageBuffer = await fetchImageAsBuffer(source);
+  return loadImage(imageBuffer);
+}
 
 async function getUserIdFromUsername(username) {
   const cacheKey = `username:${username.toLowerCase()}`;
@@ -81,6 +102,54 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.lineTo(x, y + r);
   ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
+}
+
+function extractInitials(username) {
+  if (!username) {
+    return '?';
+  }
+  const normalized = String(username)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .filter(Boolean);
+  if (normalized.length === 0) {
+    return '?';
+  }
+  if (normalized.length === 1) {
+    return normalized[0];
+  }
+  return normalized.join('');
+}
+
+function drawAvatarFallback(ctx, x, y, size, username) {
+  const gradient = ctx.createLinearGradient(x, y, x, y + size);
+  gradient.addColorStop(0, '#1C2338');
+  gradient.addColorStop(1, '#0F1423');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x, y, size, size);
+
+  const overlay = ctx.createRadialGradient(
+    x + size * 0.5,
+    y + size * 0.5,
+    size * 0.1,
+    x + size * 0.5,
+    y + size * 0.5,
+    size * 0.65
+  );
+  overlay.addColorStop(0, 'rgba(0, 255, 168, 0.25)');
+  overlay.addColorStop(1, 'rgba(0, 0, 0, 0.05)');
+  ctx.fillStyle = overlay;
+  ctx.fillRect(x, y, size, size);
+
+  const initials = extractInitials(username);
+  ctx.fillStyle = '#00FFA8';
+  ctx.font = `bold ${Math.floor(size * 0.45)}px Arial`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(initials, x + size / 2, y + size / 2);
 }
 
 function drawBlob(ctx, cx, cy, r, fill) {
@@ -170,7 +239,7 @@ function resolveRatingLabel(rating, ratingCount) {
   return `Calificación: ${rating.toFixed(2)}`;
 }
 
-async function renderCard({ username, avatarUrl, rating, ratingCount, vouches }) {
+async function renderCard({ username, avatarUrl, fallbackAvatarUrl, rating, ratingCount, vouches }) {
   const canvas = createCanvas(CANVAS_W * SCALE, CANVAS_H * SCALE);
   const ctx = canvas.getContext('2d');
   ctx.scale(SCALE, SCALE);
@@ -218,7 +287,27 @@ async function renderCard({ username, avatarUrl, rating, ratingCount, vouches })
   const contentEndX = panel.x + panel.w - PADDING;
   const availableContentWidth = contentEndX - contentStartX;
 
-  const avatarImg = await loadImage(avatarUrl);
+  let avatarImg = null;
+  const attemptedSources = [avatarUrl, fallbackAvatarUrl].filter((value, index, array) => value && array.indexOf(value) === index);
+  for (let i = 0; i < attemptedSources.length; i += 1) {
+    const source = attemptedSources[i];
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      avatarImg = await loadRobloxImage(source);
+      if (i > 0) {
+        logger.info('Avatar de Roblox cargado utilizando URL alternativa', { source });
+      }
+      break;
+    } catch (error) {
+      const logPayload = { source, error: error?.message ?? error };
+      if (i === attemptedSources.length - 1) {
+        logger.error('No se pudo cargar avatar de Roblox, se usará placeholder', logPayload);
+        avatarImg = null;
+      } else {
+        logger.warn('Fallo al cargar avatar de Roblox, reintentando', logPayload);
+      }
+    }
+  }
 
   ctx.save();
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -232,7 +321,11 @@ async function renderCard({ username, avatarUrl, rating, ratingCount, vouches })
   ctx.beginPath();
   ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
   ctx.clip();
-  ctx.drawImage(avatarImg, avatarX, avatarY, avatarSize, avatarSize);
+  if (avatarImg) {
+    ctx.drawImage(avatarImg, avatarX, avatarY, avatarSize, avatarSize);
+  } else {
+    drawAvatarFallback(ctx, avatarX, avatarY, avatarSize, username);
+  }
   ctx.restore();
 
   ctx.strokeStyle = '#00FFA8';
@@ -392,9 +485,11 @@ export async function generateForRobloxUser({ robloxUsername, robloxUserId, rati
     throw new Error('No se pudo resolver el usuario de Roblox para la tarjeta');
   }
   const info = await getRobloxInfo(resolvedUserId);
+  const fallbackAvatarUrl = `https://www.roblox.com/headshot-thumbnail/image?userId=${resolvedUserId}&width=352&height=352&format=png`;
   const card = await renderCard({
     username: info.username,
     avatarUrl: info.avatarUrl,
+    fallbackAvatarUrl,
     rating: clamp(Number.isFinite(rating) ? rating : 0, 0, 5),
     ratingCount: Number.isFinite(ratingCount) ? Math.max(0, ratingCount) : 0,
     vouches: Math.max(0, vouches ?? 0),

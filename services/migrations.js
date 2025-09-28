@@ -24,7 +24,7 @@ const MIGRATIONS = [
     channel_id VARCHAR(20) NOT NULL,
     owner_id VARCHAR(20) NOT NULL,
     type ENUM('buy','sell','robux','nitro','decor','mm') NOT NULL,
-    status ENUM('open','closed','pending') DEFAULT 'open',
+    status ENUM('OPEN','CONFIRMED','CLAIMED','CLOSED') DEFAULT 'OPEN',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     closed_at TIMESTAMP NULL,
     INDEX idx_tickets_owner_status (owner_id, status),
@@ -87,10 +87,23 @@ const MIGRATIONS = [
     closed_at TIMESTAMP NULL,
     vouched TINYINT(1) NOT NULL DEFAULT 0,
     forced_close TINYINT(1) NOT NULL DEFAULT 0,
+    panel_message_id VARCHAR(20) NULL,
+    finalization_message_id VARCHAR(20) NULL,
     INDEX idx_claims_mm (middleman_user_id, claimed_at DESC),
     CONSTRAINT fk_claim_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
     CONSTRAINT fk_claim_middleman FOREIGN KEY (middleman_user_id) REFERENCES middlemen(discord_user_id) ON DELETE CASCADE
-  ) ENGINE=InnoDB`
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS mm_trade_finalizations (
+    ticket_id INT NOT NULL,
+    user_id VARCHAR(20) NOT NULL,
+    confirmed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(ticket_id, user_id),
+    CONSTRAINT fk_mtf_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+    CONSTRAINT fk_mtf_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`,
+  `ALTER TABLE tickets MODIFY COLUMN status ENUM('OPEN','CONFIRMED','CLAIMED','CLOSED') DEFAULT 'OPEN'`,
+  `ALTER TABLE mm_claims ADD COLUMN IF NOT EXISTS panel_message_id VARCHAR(20) NULL`,
+  `ALTER TABLE mm_claims ADD COLUMN IF NOT EXISTS finalization_message_id VARCHAR(20) NULL`
 ];
 
 export async function runMigrations() {
